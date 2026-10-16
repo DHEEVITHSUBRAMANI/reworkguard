@@ -8,7 +8,9 @@ import {
   PayrollPolicy, 
   PayrollRecord, 
   AuditLog, 
-  AppNotification 
+  AppNotification,
+  TaskStateHistory,
+  BugAttributionRecord
 } from '../types';
 import { 
   INITIAL_USERS, 
@@ -20,7 +22,9 @@ import {
   INITIAL_POLICY, 
   INITIAL_PAYROLL, 
   INITIAL_AUDIT_LOGS, 
-  INITIAL_NOTIFICATIONS 
+  INITIAL_NOTIFICATIONS,
+  INITIAL_TASK_STATE_HISTORY,
+  INITIAL_BUG_ATTRIBUTION_HISTORY
 } from '../data/seedData';
 
 const STORAGE_KEYS = {
@@ -36,6 +40,8 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: 'reworkguard_notifications_v1',
   ACTIVE_USER_ID: 'reworkguard_active_user_id_v1',
   SELECTED_MONTH: 'reworkguard_selected_month_v1',
+  TASK_STATE_HISTORY: 'reworkguard_task_history_v1',
+  BUG_ATTRIBUTION_HISTORY: 'reworkguard_bug_attributions_v1',
 };
 
 function getFromStorage<T>(key: string, defaultValue: T): T {
@@ -97,6 +103,12 @@ export const StorageService = {
   getSelectedMonth: (): string => getFromStorage(STORAGE_KEYS.SELECTED_MONTH, '2026-11'),
   setSelectedMonth: (month: string) => setToStorage(STORAGE_KEYS.SELECTED_MONTH, month),
 
+  getTaskStateHistory: (): TaskStateHistory[] => getFromStorage(STORAGE_KEYS.TASK_STATE_HISTORY, INITIAL_TASK_STATE_HISTORY),
+  setTaskStateHistory: (history: TaskStateHistory[]) => setToStorage(STORAGE_KEYS.TASK_STATE_HISTORY, history),
+
+  getBugAttributions: (): BugAttributionRecord[] => getFromStorage(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, INITIAL_BUG_ATTRIBUTION_HISTORY),
+  setBugAttributions: (records: BugAttributionRecord[]) => setToStorage(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, records),
+
   resetToSeedData: () => {
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
     localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(INITIAL_PROJECTS));
@@ -110,5 +122,7 @@ export const StorageService = {
     localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(INITIAL_NOTIFICATIONS));
     localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, JSON.stringify('usr-fin-1'));
     localStorage.setItem(STORAGE_KEYS.SELECTED_MONTH, JSON.stringify('2026-11'));
+    localStorage.setItem(STORAGE_KEYS.TASK_STATE_HISTORY, JSON.stringify(INITIAL_TASK_STATE_HISTORY));
+    localStorage.setItem(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, JSON.stringify(INITIAL_BUG_ATTRIBUTION_HISTORY));
   }
 };

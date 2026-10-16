@@ -12,30 +12,52 @@ import {
   Info, 
   HelpCircle,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  ShieldCheck,
+  History,
+  Check,
+  X,
+  Layers,
+  Wrench
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
-import { formatDateTime, formatDate, cn } from '../lib/utils';
-import { BugReport, BugSeverity, BugStatus, DefectClassification } from '../types';
+import { formatDateTime, formatDate, formatHours, cn } from '../lib/utils';
+import { BugReport, BugSeverity, BugStatus, DefectClassification, Task } from '../types';
 
 export const Bugs: React.FC = () => {
-  const { bugs, modules, projects, tasks, addBugReport, classifyDefect, searchQuery } = useApp();
-  const { currentUser, users, canClassifyDefect } = useAuth();
+  const { 
+    bugs, 
+    modules, 
+    projects, 
+    tasks, 
+    timeLogs, 
+    bugAttributions,
+    addBugReport, 
+    classifyDefect, 
+    verifyBugFix,
+    searchQuery 
+  } = useApp();
+  const { currentUser, users, canClassifyDefect, isManager, isLead } = useAuth();
 
   const [classificationFilter, setClassificationFilter] = useState<string>('all');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  // Modals
+  // Modals & Drawers
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [classifyTarget, setClassifyTarget] = useState<BugReport | null>(null);
   const [selectedClassification, setSelectedClassification] = useState<DefectClassification>('caused_by_original_delivery');
   const [classificationNotes, setClassificationNotes] = useState('');
+  
+  const [verifyTarget, setVerifyTarget] = useState<BugReport | null>(null);
+  const [verifyResult, setVerifyResult] = useState<'pass' | 'fail'>('pass');
+  const [verifyNotes, setVerifyNotes] = useState('');
+
   const [detailBug, setDetailBug] = useState<BugReport | null>(null);
 
-  // Form State
+  // Form State for Report Defect
   const [newBug, setNewBug] = useState({
     title: '',
     description: '',
@@ -51,10 +73,31 @@ export const Bugs: React.FC = () => {
     defect_classification: 'pending_investigation' as DefectClassification,
   });
 
-  const handleReportBug = (e: React.FormEvent) => {
+  // Handle task selection during bug reporting (auto-populates module, project, original developer)
+  const handleTaskSelectionChange = (taskId: string) => {
+    const selectedTask = tasks.find(t => t.id === taskId);
+    if (selectedTask) {
+      const origDevId = selectedTask.original_delivery_employee_id || selectedTask.assigned_to;
+      setNewBug({
+        ...newBug,
+        task_id: selectedTask.id,
+        module_id: selectedTask.module_id,
+        project_id: selectedTask.project_id,
+        original_developer_id: origDevId,
+        assigned_to: origDevId,
+      });
+    } else {
+      setNewBug({
+        ...newBug,
+        task_id: taskId,
+      });
+    }
+  };
+
+  const handleReportBug = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBug.title || !newBug.module_id) return;
-    addBugReport(newBug);
+    if (!newBug.title || !newBug.module_id || !newBug.task_id) return;
+    await addBugReport(newBug);
     setIsReportModalOpen(false);
     setNewBug({
       title: '',
@@ -72,17 +115,44 @@ export const Bugs: React.FC = () => {
     });
   };
 
-  const handleConfirmClassification = () => {
+  const handleConfirmClassification = async () => {
     if (!classifyTarget) return;
-    classifyDefect(classifyTarget.id, selectedClassification, classificationNotes);
+    const isExempt = selectedClassification === 'not_caused_by_original_delivery' || 
+                     selectedClassification === 'scope_change' || 
+                     selectedClassification === 'external_dependency_issue';
+    
+    if (isExempt && classificationNotes.trim().length < 10) {
+      alert('A written justification of at least 10 characters is required for exempt defect classifications.');
+      return;
+    }
+
+    await classifyDefect(classifyTarget.id, selectedClassification, classificationNotes);
     setClassifyTarget(null);
     setClassificationNotes('');
   };
 
+  const handleConfirmVerification = async () => {
+    if (!verifyTarget) return;
+    if (!verifyNotes.trim()) {
+      alert('Please enter verification sign-off notes.');
+      return;
+    }
+    await verifyBugFix(verifyTarget.id, verifyResult === 'pass', verifyNotes);
+    setVerifyTarget(null);
+    setVerifyNotes('');
+  };
+
   // Metrics
   const totalBugs = bugs.length;
-  const causedByDelivery = bugs.filter(b => b.defect_classification === 'caused_by_original_delivery').length;
-  const notCausedByDelivery = bugs.filter(b => b.defect_classification === 'not_caused_by_original_delivery').length;
+  const causedByDelivery = bugs.filter(b => 
+    b.defect_classification === 'caused_by_original_delivery' || 
+    b.defect_classification === 'original_delivery_defect'
+  ).length;
+  const notCausedByDelivery = bugs.filter(b => 
+    b.defect_classification === 'not_caused_by_original_delivery' || 
+    b.defect_classification === 'scope_change' ||
+    b.defect_classification === 'external_dependency_issue'
+  ).length;
   const pendingInvestigation = bugs.filter(b => b.defect_classification === 'pending_investigation').length;
 
   // Filter
@@ -90,7 +160,13 @@ export const Bugs: React.FC = () => {
     const matchesSearch = 
       b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       b.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesClassification = classificationFilter === 'all' || b.defect_classification === classificationFilter;
+    
+    const matchesClassification = 
+      classificationFilter === 'all' || 
+      b.defect_classification === classificationFilter ||
+      (classificationFilter === 'caused_by_original_delivery' && b.defect_classification === 'original_delivery_defect') ||
+      (classificationFilter === 'not_caused_by_original_delivery' && (b.defect_classification === 'scope_change' || b.defect_classification === 'external_dependency_issue'));
+
     const matchesSeverity = severityFilter === 'all' || b.severity === severityFilter;
     const matchesStatus = statusFilter === 'all' || b.status === statusFilter;
     return matchesSearch && matchesClassification && matchesSeverity && matchesStatus;
@@ -112,6 +188,7 @@ export const Bugs: React.FC = () => {
   const getClassificationBadge = (classification: DefectClassification) => {
     switch (classification) {
       case 'caused_by_original_delivery':
+      case 'original_delivery_defect':
         return (
           <Badge variant="danger" dot title="Attributable rework hours will be subject to next-month payroll review">
             Caused by Original Delivery
@@ -120,7 +197,19 @@ export const Bugs: React.FC = () => {
       case 'not_caused_by_original_delivery':
         return (
           <Badge variant="success" dot title="Exempt from payroll deduction (external / client spec change)">
-            Not Caused by Delivery (Exempt)
+            Exempt (Spec / Client)
+          </Badge>
+        );
+      case 'scope_change':
+        return (
+          <Badge variant="purple" dot title="Exempt: Scope shift post-delivery">
+            Exempt (Scope Change)
+          </Badge>
+        );
+      case 'external_dependency_issue':
+        return (
+          <Badge variant="info" dot title="Exempt: Third-party library or service outage">
+            Exempt (External Issue)
           </Badge>
         );
       case 'pending_investigation':
@@ -131,6 +220,26 @@ export const Bugs: React.FC = () => {
         );
     }
   };
+
+  // Attribution records for currently detailed or classified bug
+  const currentAttributions = detailBug
+    ? (bugAttributions || []).filter(a => a.bug_id === detailBug.id).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    : [];
+
+  const classifyAttributions = classifyTarget
+    ? (bugAttributions || []).filter(a => a.bug_id === classifyTarget.id).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    : [];
+
+  // Linked time logs for detail bug
+  const bugTimeLogs = detailBug
+    ? timeLogs.filter(l => l.bug_id === detailBug.id)
+    : [];
+
+  const totalReworkHoursOnBug = bugTimeLogs.reduce((acc, l) => acc + l.hours, 0);
+
+  const isExemptSelected = selectedClassification === 'not_caused_by_original_delivery' || 
+                           selectedClassification === 'scope_change' || 
+                           selectedClassification === 'external_dependency_issue';
 
   return (
     <div className="space-y-6">
@@ -172,7 +281,7 @@ export const Bugs: React.FC = () => {
           >
             <option value="all">All Classifications</option>
             <option value="caused_by_original_delivery">Caused by Original Delivery</option>
-            <option value="not_caused_by_original_delivery">Not Caused by Delivery (Exempt)</option>
+            <option value="not_caused_by_original_delivery">Exempt Classifications</option>
             <option value="pending_investigation">Pending Investigation</option>
           </select>
 
@@ -238,7 +347,8 @@ export const Bugs: React.FC = () => {
                   const module = modules.find((m) => m.id === bug.module_id);
                   const project = projects.find((p) => p.id === bug.project_id);
                   const originalDev = users.find((u) => u.id === bug.original_developer_id);
-                  const isAttributable = bug.defect_classification === 'caused_by_original_delivery';
+                  const isAttributable = bug.defect_classification === 'caused_by_original_delivery' || bug.defect_classification === 'original_delivery_defect';
+                  const task = tasks.find(t => t.id === bug.task_id);
 
                   return (
                     <tr 
@@ -254,7 +364,10 @@ export const Bugs: React.FC = () => {
                           <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded border">
                             {bug.id}
                           </span>
-                          <span className="font-semibold text-slate-900 text-xs">
+                          <span 
+                            onClick={() => setDetailBug(bug)}
+                            className="font-semibold text-slate-900 text-xs hover:text-blue-600 cursor-pointer"
+                          >
                             {bug.title}
                           </span>
                         </div>
@@ -265,6 +378,12 @@ export const Bugs: React.FC = () => {
                           <span className="font-semibold text-slate-700">{project?.code}</span>
                           <span>•</span>
                           <span>{module?.name}</span>
+                          {task && (
+                            <>
+                              <span>•</span>
+                              <span className="text-slate-600 font-mono">Task: {task.title.slice(0, 24)}...</span>
+                            </>
+                          )}
                         </div>
                       </td>
 
@@ -310,7 +429,12 @@ export const Bugs: React.FC = () => {
 
                       {/* Status */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        <span className="capitalize text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                        <span className={cn(
+                          "capitalize text-xs font-semibold px-2 py-0.5 rounded-full border",
+                          bug.status === 'verified_resolved' 
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                            : "bg-slate-100 text-slate-700 border-slate-200"
+                        )}>
                           {bug.status.replace('_', ' ')}
                         </span>
                         <span className="text-[10px] text-slate-400 block mt-0.5">
@@ -320,14 +444,30 @@ export const Bugs: React.FC = () => {
 
                       {/* Actions */}
                       <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => setDetailBug(bug)}
                             className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors"
-                            title="View details & reproduction steps"
+                            title="View details & attribution audit"
                           >
                             <FileText className="w-4 h-4" />
                           </button>
+
+                          {/* Verify Fix Action */}
+                          {(isManager || isLead) && (bug.status === 'in_fix' || bug.status === 'investigating') && (
+                            <button
+                              onClick={() => {
+                                setVerifyTarget(bug);
+                                setVerifyResult('pass');
+                                setVerifyNotes('');
+                              }}
+                              className="px-2 py-1 text-xs font-medium rounded-md bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors flex items-center gap-1"
+                              title="Verify bug resolution"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              Verify Fix
+                            </button>
+                          )}
 
                           {canClassifyDefect && (
                             <button
@@ -354,12 +494,12 @@ export const Bugs: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal: Report Defect */}
+      {/* Modal: Report Defect with Mandatory Delivered Task/Module Selection */}
       <Modal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
         title="Report Post-Delivery Defect"
-        description="Log a defect discovered in production or client acceptance testing."
+        description="Select the delivered task/module to auto-link original developer and trigger reopening."
       >
         <form onSubmit={handleReportBug} className="space-y-4">
           <div>
@@ -374,46 +514,30 @@ export const Bugs: React.FC = () => {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Project *</label>
-              <select
-                value={newBug.project_id}
-                onChange={(e) => {
-                  const pId = e.target.value;
-                  const relevantModules = modules.filter(m => m.project_id === pId);
-                  setNewBug({
-                    ...newBug,
-                    project_id: pId,
-                    module_id: relevantModules[0]?.id || '',
-                  });
-                }}
-                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.code} - {p.name}
+          {/* Mandatory Task Selector */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Delivered Feature / Target Task *
+            </label>
+            <select
+              required
+              value={newBug.task_id}
+              onChange={(e) => handleTaskSelectionChange(e.target.value)}
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+            >
+              <option value="">-- Select Delivered Task --</option>
+              {tasks.map((t) => {
+                const origDev = users.find(u => u.id === (t.original_delivery_employee_id || t.assigned_to));
+                return (
+                  <option key={t.id} value={t.id}>
+                    [{t.status.toUpperCase()}] {t.title} (Orig: {origDev?.full_name || 'N/A'})
                   </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Delivered Module *</label>
-              <select
-                value={newBug.module_id}
-                onChange={(e) => setNewBug({ ...newBug, module_id: e.target.value })}
-                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {modules
-                  .filter(m => m.project_id === newBug.project_id)
-                  .map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.code} - {m.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
+                );
+              })}
+            </select>
+            <span className="text-[10px] text-slate-400 mt-1 block">
+              If task is completed or closed, reporting this bug will automatically reopen it and snapshot original delivery.
+            </span>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -432,11 +556,11 @@ export const Bugs: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Original Developer to Investigate</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Original Developer Snapshot</label>
               <select
                 value={newBug.original_developer_id}
                 onChange={(e) => setNewBug({ ...newBug, original_developer_id: e.target.value, assigned_to: e.target.value })}
-                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
               >
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
@@ -454,7 +578,7 @@ export const Bugs: React.FC = () => {
               required
               value={newBug.description}
               onChange={(e) => setNewBug({ ...newBug, description: e.target.value })}
-              placeholder="Describe the failure, error logs, and impact..."
+              placeholder="Describe the failure, observed error logs, and impact..."
               className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -474,14 +598,14 @@ export const Bugs: React.FC = () => {
             <Button type="button" variant="outline" size="sm" onClick={() => setIsReportModalOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" size="sm">
+            <Button type="submit" size="sm" disabled={!newBug.task_id}>
               Submit Bug Report
             </Button>
           </div>
         </form>
       </Modal>
 
-      {/* Modal: Classify Defect (Manager Action) */}
+      {/* Modal: Classify Defect (Manager Action with Justification Requirement) */}
       <Modal
         isOpen={Boolean(classifyTarget)}
         onClose={() => setClassifyTarget(null)}
@@ -498,10 +622,11 @@ export const Bugs: React.FC = () => {
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-2">Classification Decision *</label>
             <div className="space-y-2">
+              {/* Option 1: Attributable */}
               <label 
                 className={cn(
                   'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
-                  selectedClassification === 'caused_by_original_delivery'
+                  (selectedClassification === 'caused_by_original_delivery' || selectedClassification === 'original_delivery_defect')
                     ? 'border-rose-300 bg-rose-50/50 ring-1 ring-rose-400'
                     : 'border-slate-200 hover:bg-slate-50'
                 )}
@@ -510,52 +635,84 @@ export const Bugs: React.FC = () => {
                   type="radio"
                   name="classification"
                   value="caused_by_original_delivery"
-                  checked={selectedClassification === 'caused_by_original_delivery'}
+                  checked={selectedClassification === 'caused_by_original_delivery' || selectedClassification === 'original_delivery_defect'}
                   onChange={() => setSelectedClassification('caused_by_original_delivery')}
                   className="mt-0.5 text-rose-600 focus:ring-rose-500"
                 />
                 <div>
                   <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    Caused by Original Delivery
+                    Caused by Original Delivery Defect
                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 font-bold">
                       Subject to Rework Deduction
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                    Code defect, missing validation, or unhandled edge case within delivered requirements. Approved corrective hours will enter next-month deduction review.
+                    Code defect, missing validation, or unhandled regression within original scope. Approved corrective hours enter next-month deduction review.
                   </p>
                 </div>
               </label>
 
+              {/* Option 2: Scope Change (Exempt) */}
               <label 
                 className={cn(
                   'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
-                  selectedClassification === 'not_caused_by_original_delivery'
-                    ? 'border-emerald-300 bg-emerald-50/50 ring-1 ring-emerald-400'
+                  (selectedClassification === 'scope_change' || selectedClassification === 'not_caused_by_original_delivery')
+                    ? 'border-purple-300 bg-purple-50/50 ring-1 ring-purple-400'
                     : 'border-slate-200 hover:bg-slate-50'
                 )}
               >
                 <input
                   type="radio"
                   name="classification"
-                  value="not_caused_by_original_delivery"
-                  checked={selectedClassification === 'not_caused_by_original_delivery'}
-                  onChange={() => setSelectedClassification('not_caused_by_original_delivery')}
-                  className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                  value="scope_change"
+                  checked={selectedClassification === 'scope_change' || selectedClassification === 'not_caused_by_original_delivery'}
+                  onChange={() => setSelectedClassification('scope_change')}
+                  className="mt-0.5 text-purple-600 focus:ring-purple-500"
                 />
                 <div>
                   <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    Not Caused by Original Delivery
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold">
+                    Scope Change / Client Requirement Shift
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 font-bold">
                       Exempt from Deduction
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                    Client specification shift, third-party API break, or environmental outage. Corrective hours remain visible for audit but zero deduction is applied.
+                    Customer shifted expectations or requested modifications after sign-off. Mandatory written justification required. Zero employee deduction.
                   </p>
                 </div>
               </label>
 
+              {/* Option 3: External Dependency Issue (Exempt) */}
+              <label 
+                className={cn(
+                  'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
+                  selectedClassification === 'external_dependency_issue'
+                    ? 'border-blue-300 bg-blue-50/50 ring-1 ring-blue-400'
+                    : 'border-slate-200 hover:bg-slate-50'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="classification"
+                  value="external_dependency_issue"
+                  checked={selectedClassification === 'external_dependency_issue'}
+                  onChange={() => setSelectedClassification('external_dependency_issue')}
+                  className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    External Dependency / Infrastructure Outage
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-blue-800 font-bold">
+                      Exempt from Deduction
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    Third-party API downtime, vendor library breaking change, or cloud infrastructure failure outside engineer control. Zero employee deduction.
+                  </p>
+                </div>
+              </label>
+
+              {/* Option 4: Pending Investigation */}
               <label 
                 className={cn(
                   'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
@@ -584,30 +741,144 @@ export const Bugs: React.FC = () => {
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Manager Rationale & Classification Notes *
+              Manager Rationale & Classification Notes {isExemptSelected && <span className="text-rose-500">* (Min 10 characters for exempt status)</span>}
             </label>
             <textarea
               rows={3}
-              required
+              required={isExemptSelected}
               value={classificationNotes}
               onChange={(e) => setClassificationNotes(e.target.value)}
-              placeholder="Cite specific code audits, scope documents, or client communications..."
+              placeholder={isExemptSelected 
+                ? "Mandatory justification: cite client change request document or third-party outage incident ID..." 
+                : "Cite specific code audits, scope documents, or client communications..."
+              }
               className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+            {isExemptSelected && classificationNotes.trim().length > 0 && classificationNotes.trim().length < 10 && (
+              <span className="text-[10px] text-rose-600 mt-1 block">
+                Needs {10 - classificationNotes.trim().length} more characters of justification.
+              </span>
+            )}
           </div>
+
+          {/* Past Attribution Decisions */}
+          {classifyAttributions.length > 0 && (
+            <div className="pt-2 border-t border-slate-200">
+              <span className="text-[11px] font-bold text-slate-600 uppercase block mb-1">
+                Previous Attribution Records ({classifyAttributions.length})
+              </span>
+              <div className="max-h-32 overflow-y-auto space-y-1 text-[11px]">
+                {classifyAttributions.map((a) => (
+                  <div key={a.id} className="p-2 bg-slate-50 border border-slate-200 rounded text-slate-700">
+                    <span className="font-semibold text-slate-900">{a.new_classification.replace(/_/g, ' ')}</span>
+                    <span className="text-slate-400 text-[10px] ml-2">{formatDate(a.created_at)}</span>
+                    <p className="text-slate-600 italic mt-0.5">{a.justification}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setClassifyTarget(null)}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleConfirmClassification}>
+            <Button 
+              size="sm" 
+              onClick={handleConfirmClassification}
+              disabled={isExemptSelected && classificationNotes.trim().length < 10}
+            >
               Save Classification
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* Modal: Defect Details & Reproduction Steps */}
+      {/* Modal: Fix Verification (Pass / Fail by Lead or Manager) */}
+      <Modal
+        isOpen={Boolean(verifyTarget)}
+        onClose={() => setVerifyTarget(null)}
+        title="Verify Bug Fix and Resolution"
+        description={`Authoritative sign-off on ${verifyTarget?.id} - ${verifyTarget?.title}`}
+      >
+        <div className="space-y-4 text-xs">
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <span className="font-bold text-slate-900 block">Defect Context:</span>
+            <p className="text-slate-600 mt-1">{verifyTarget?.description}</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">Verification Decision *</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setVerifyResult('pass')}
+                className={cn(
+                  'p-3 rounded-lg border text-left transition-all',
+                  verifyResult === 'pass'
+                    ? 'border-emerald-500 bg-emerald-50/70 ring-1 ring-emerald-500'
+                    : 'border-slate-200 hover:bg-slate-50'
+                )}
+              >
+                <div className="flex items-center gap-1.5 font-bold text-emerald-800">
+                  <Check className="w-4 h-4 text-emerald-600" /> Pass Verification
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Fix is verified and accepted. Closes the defect and marks the underlying task closed.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setVerifyResult('fail')}
+                className={cn(
+                  'p-3 rounded-lg border text-left transition-all',
+                  verifyResult === 'fail'
+                    ? 'border-rose-500 bg-rose-50/70 ring-1 ring-rose-500'
+                    : 'border-slate-200 hover:bg-slate-50'
+                )}
+              >
+                <div className="flex items-center gap-1.5 font-bold text-rose-800">
+                  <X className="w-4 h-4 text-rose-600" /> Fail Verification
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Defect persists or tests failed. Returns defect to &apos;In Fix&apos; and task to &apos;Under Fix&apos;.
+                </p>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Verification Sign-Off Notes *
+            </label>
+            <textarea
+              rows={3}
+              required
+              value={verifyNotes}
+              onChange={(e) => setVerifyNotes(e.target.value)}
+              placeholder="State reproduction test results, environment, and code verification remarks..."
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setVerifyTarget(null)}>
+              Cancel
+            </Button>
+            <Button 
+              size="sm" 
+              variant={verifyResult === 'pass' ? 'primary' : 'danger'}
+              onClick={handleConfirmVerification}
+              disabled={!verifyNotes.trim()}
+            >
+              Submit Verification
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Defect Details, Time Logs & Attribution History */}
       <Modal
         isOpen={Boolean(detailBug)}
         onClose={() => setDetailBug(null)}
@@ -634,12 +905,88 @@ export const Bugs: React.FC = () => {
             </pre>
           </div>
 
-          {detailBug?.classification_notes && (
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-900">
-              <span className="font-bold block">Manager Notes:</span>
-              <p className="mt-0.5">{detailBug.classification_notes}</p>
-            </div>
-          )}
+          {/* Linked Time Logs */}
+          <div>
+            <span className="font-semibold text-slate-700 block mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Wrench className="w-4 h-4 text-slate-500" />
+                Corrective Time Logged Against this Defect ({bugTimeLogs.length} entries)
+              </span>
+              <span className="font-mono font-bold text-amber-700">
+                Total: {formatHours(totalReworkHoursOnBug)}
+              </span>
+            </span>
+
+            {bugTimeLogs.length === 0 ? (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 italic text-center">
+                No corrective maintenance hours logged on this defect yet.
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                {bugTimeLogs.map((log) => {
+                  const dev = users.find(u => u.id === log.user_id);
+                  return (
+                    <div key={log.id} className="p-2.5 hover:bg-slate-50 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-slate-800">{dev?.full_name}</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-[10px] text-slate-500">{formatDate(log.date)}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 italic mt-0.5 line-clamp-1">&quot;{log.description}&quot;</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-bold text-amber-700 block">{formatHours(log.hours)}</span>
+                        <span className={cn(
+                          "text-[9px] uppercase font-bold px-1 rounded",
+                          log.approval_status === 'approved' ? "text-emerald-700 bg-emerald-50" : "text-amber-700 bg-amber-50"
+                        )}>
+                          {log.approval_status}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Attribution History Trail */}
+          <div>
+            <span className="font-semibold text-slate-700 block mb-2 flex items-center gap-1.5">
+              <History className="w-4 h-4 text-slate-500" />
+              Managerial Attribution Audit Trail ({currentAttributions.length})
+            </span>
+            {currentAttributions.length === 0 ? (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 italic text-center">
+                No recorded attribution changes.
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                {currentAttributions.map((a) => {
+                  const decider = users.find(u => u.id === a.decided_by);
+                  return (
+                    <div key={a.id} className="p-2.5 hover:bg-slate-50">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-800">
+                          {a.new_classification.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {formatDateTime(a.created_at)}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-1 italic">
+                        &quot;{a.justification}&quot;
+                      </p>
+                      <span className="text-[10px] text-slate-400 block mt-1">
+                        Decider: {decider?.full_name || a.decided_by}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <div className="pt-3 border-t border-slate-100 flex justify-end">
             <Button variant="outline" size="sm" onClick={() => setDetailBug(null)}>

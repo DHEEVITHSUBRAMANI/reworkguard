@@ -18,7 +18,9 @@ import {
   DefectClassification,
   ApprovalStatus,
   AttributionStatus,
-  UserRole
+  UserRole,
+  BugAttributionRecord,
+  BugStatus
 } from '../types';
 
 /**
@@ -199,59 +201,203 @@ export const tasksApi = {
   },
 
   async create(task: Omit<Task, 'id' | 'created_at' | 'corrective_hours' | 'actual_regular_hours'>): Promise<Task | null> {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('tasks').insert(task).select().single();
-      if (!error && data) return data;
-    }
     const newT: Task = {
       ...task,
       id: `tsk-${Date.now()}`,
+      assigned_to: task.assigned_to || task.assigned_employee_id || '',
+      assigned_employee_id: task.assigned_employee_id || task.assigned_to,
+      status: task.status || 'assigned',
       corrective_hours: 0,
       actual_regular_hours: 0,
       created_at: new Date().toISOString()
     };
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('tasks').insert(newT).select().single();
+      if (!error && data) return data;
+    }
     const current = StorageService.getTasks();
     StorageService.setTasks([newT, ...current]);
     return newT;
   },
 
-  async complete(taskId: string): Promise<boolean> {
+  async complete(taskId: string, actorId: string = 'system', actorName: string = 'System Process'): Promise<{ success: boolean; task?: Task; error?: string }> {
+    const tasks = StorageService.getTasks();
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return { success: false, error: 'Task not found' };
+
     const now = new Date().toISOString();
+    const todayStr = now.split('T')[0];
+    const isOnTime = !task.committed_due_date || (todayStr <= task.committed_due_date);
+    const originalDeliveryEmployee = task.original_delivery_employee_id || task.assigned_to || task.assigned_employee_id;
+
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase
         .from('tasks')
         .update({
           status: 'completed',
           actual_completion_date: now,
-          delivered_at: now
+          delivered_at: now,
+          original_delivery_employee_id: originalDeliveryEmployee,
+          is_delivered_on_time: isOnTime
         })
         .eq('id', taskId);
-      if (!error) return true;
+      if (error) console.error('Supabase complete error:', error);
     }
-    const tasks = StorageService.getTasks().map(t => t.id === taskId ? {
-      ...t,
-      status: 'completed' as const,
-      completed_at: now,
+
+    const updatedTask: Task = {
+      ...task,
+      status: 'completed',
+      actual_completion_date: now,
       delivered_at: now,
-    } : t);
-    StorageService.setTasks(tasks);
-    return true;
+      completed_at: now,
+      original_delivery_employee_id: originalDeliveryEmployee,
+      is_delivered_on_time: isOnTime,
+      updated_at: now
+    };
+
+    const updatedTasks = tasks.map(t => t.id === taskId ? updatedTask : t);
+    StorageService.setTasks(updatedTasks);
+
+    // Record State History
+    const stateRecord: TaskStateHistory = {
+      id: `tsh-${Date.now()}`,
+      task_id: taskId,
+      previous_status: task.status,
+      new_status: 'completed',
+      actor_id: actorId,
+      actor_name: actorName,
+      reason: `Task completed and delivered. On-time delivery: ${isOnTime ? 'YES' : 'NO'}.`,
+      timestamp: now
+    };
+    const history = StorageService.getTaskStateHistory();
+    StorageService.setTaskStateHistory([stateRecord, ...history]);
+
+    return { success: true, task: updatedTask };
   },
 
-  async reopen(taskId: string, reason: string): Promise<boolean> {
+  async reopen(taskId: string, reason: string, actorId: string = 'system', actorName: string = 'System Process'): Promise<{ success: boolean; task?: Task; error?: string }> {
+    const tasks = StorageService.getTasks();
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return { success: false, error: 'Task not found' };
+
+    const now = new Date().toISOString();
     if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase
+      await supabase
         .from('tasks')
-        .update({ status: 'reopened' })
+        .update({ status: 'reopened', updated_at: now })
         .eq('id', taskId);
-      if (!error) return true;
     }
-    const tasks = StorageService.getTasks().map(t => t.id === taskId ? {
-      ...t,
-      status: 'reopened' as const
-    } : t);
-    StorageService.setTasks(tasks);
-    return true;
+
+    const updatedTask: Task = {
+      ...task,
+      status: 'reopened',
+      // PRESERVE original delivery records permanently
+      original_delivery_employee_id: task.original_delivery_employee_id || task.assigned_to,
+      actual_completion_date: task.actual_completion_date,
+      committed_due_date: task.committed_due_date,
+      is_delivered_on_time: task.is_delivered_on_time,
+      updated_at: now
+    };
+
+    const updatedTasks = tasks.map(t => t.id === taskId ? updatedTask : t);
+    StorageService.setTasks(updatedTasks);
+
+    // Record State History
+    const stateRecord: TaskStateHistory = {
+      id: `tsh-${Date.now()}`,
+      task_id: taskId,
+      previous_status: task.status,
+      new_status: 'reopened',
+      actor_id: actorId,
+      actor_name: actorName,
+      reason: reason || 'Task reopened for corrective rework',
+      timestamp: now
+    };
+    const history = StorageService.getTaskStateHistory();
+    StorageService.setTaskStateHistory([stateRecord, ...history]);
+
+    return { success: true, task: updatedTask };
+  },
+
+  async startFix(taskId: string, actorId: string = 'system', actorName: string = 'System Process'): Promise<{ success: boolean; task?: Task; error?: string }> {
+    const tasks = StorageService.getTasks();
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return { success: false, error: 'Task not found' };
+
+    const now = new Date().toISOString();
+    const updatedTask: Task = {
+      ...task,
+      status: 'under_fix',
+      updated_at: now
+    };
+
+    const updatedTasks = tasks.map(t => t.id === taskId ? updatedTask : t);
+    StorageService.setTasks(updatedTasks);
+
+    const stateRecord: TaskStateHistory = {
+      id: `tsh-${Date.now()}`,
+      task_id: taskId,
+      previous_status: task.status,
+      new_status: 'under_fix',
+      actor_id: actorId,
+      actor_name: actorName,
+      reason: 'Commenced corrective maintenance work on bug fix',
+      timestamp: now
+    };
+    const history = StorageService.getTaskStateHistory();
+    StorageService.setTaskStateHistory([stateRecord, ...history]);
+
+    return { success: true, task: updatedTask };
+  },
+
+  async close(taskId: string, reason: string, actorId: string = 'system', actorName: string = 'System Process'): Promise<{ success: boolean; task?: Task; error?: string }> {
+    const tasks = StorageService.getTasks();
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return { success: false, error: 'Task not found' };
+
+    // Check verification requirement before final closure
+    const bugs = StorageService.getBugs().filter(b => (b.original_task_id === taskId || b.task_id === taskId));
+    const unverifiedBugs = bugs.filter(b => b.status !== 'closed' && b.status !== 'verified_resolved' && b.fix_verification_status !== 'passed');
+    if (unverifiedBugs.length > 0) {
+      return {
+        success: false,
+        error: `Cannot close task: Verification is required before final closure. ${unverifiedBugs.length} bug(s) remain unverified.`
+      };
+    }
+
+    const now = new Date().toISOString();
+    const updatedTask: Task = {
+      ...task,
+      status: 'closed',
+      closure_date: now,
+      updated_at: now
+    };
+
+    const updatedTasks = tasks.map(t => t.id === taskId ? updatedTask : t);
+    StorageService.setTasks(updatedTasks);
+
+    const stateRecord: TaskStateHistory = {
+      id: `tsh-${Date.now()}`,
+      task_id: taskId,
+      previous_status: task.status,
+      new_status: 'closed',
+      actor_id: actorId,
+      actor_name: actorName,
+      reason: reason || 'Task verified and officially closed',
+      timestamp: now
+    };
+    const history = StorageService.getTaskStateHistory();
+    StorageService.setTaskStateHistory([stateRecord, ...history]);
+
+    return { success: true, task: updatedTask };
+  },
+
+  getStateHistory(taskId?: string): TaskStateHistory[] {
+    const history = StorageService.getTaskStateHistory();
+    if (taskId) {
+      return history.filter(h => h.task_id === taskId);
+    }
+    return history;
   }
 };
 
@@ -265,42 +411,176 @@ export const bugsApi = {
     return StorageService.getBugs();
   },
 
-  async create(bug: Omit<BugReport, 'id' | 'created_at'>): Promise<BugReport | null> {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('bugs').insert(bug).select().single();
-      if (!error && data) return data;
+  async create(bug: Omit<BugReport, 'id' | 'created_at'>, actorId: string = 'system', actorName: string = 'System Process'): Promise<{ success: boolean; bug?: BugReport; error?: string }> {
+    const targetTaskId = bug.original_task_id || bug.task_id;
+    if (!targetTaskId && !bug.module_id) {
+      return { success: false, error: 'Cannot create defect: A delivered task or module must be selected.' };
     }
-    const newB: BugReport = { ...bug, id: `bug-${Date.now()}`, created_at: new Date().toISOString() };
-    const current = StorageService.getBugs();
-    StorageService.setBugs([newB, ...current]);
-    return newB;
+
+    const tasks = StorageService.getTasks();
+    const targetTask = targetTaskId ? tasks.find(t => t.id === targetTaskId) : undefined;
+    const now = new Date().toISOString();
+
+    const originalDevId = targetTask?.original_delivery_employee_id || targetTask?.assigned_to || bug.original_developer_id;
+
+    const newB: BugReport = {
+      ...bug,
+      id: `bug-${Date.now()}`,
+      original_task_id: targetTaskId,
+      task_id: targetTaskId,
+      original_developer_id: originalDevId,
+      assigned_to: bug.assigned_to || originalDevId,
+      reporter_id: bug.reporter_id || actorId,
+      date_found: bug.date_found || now.split('T')[0],
+      defect_classification: bug.defect_classification || 'pending_investigation',
+      status: 'open',
+      fix_verification_status: 'pending',
+      created_at: now
+    };
+
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('bugs').insert(newB).select().single();
+      if (error) console.error('Supabase bug insert error:', error);
+    }
+
+    const currentBugs = StorageService.getBugs();
+    StorageService.setBugs([newB, ...currentBugs]);
+
+    // Automatic Reopening Logic:
+    // If the delivered task is completed or closed, automatically reopen it
+    if (targetTask) {
+      if (targetTask.status === 'completed' || targetTask.status === 'closed') {
+        await tasksApi.reopen(targetTask.id, `Reopened due to defect: ${bug.title}`, actorId, actorName);
+      }
+      // If already reopened or under_fix, attach the bug WITHOUT creating duplicate reopening event!
+    }
+
+    return { success: true, bug: newB };
   },
 
-  async classify(bugId: string, classification: DefectClassification, notes: string, classifiedBy: string): Promise<boolean> {
-    const now = new Date().toISOString();
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase
-        .from('bugs')
-        .update({
-          attribution_classification: classification,
-          defect_classification: classification,
-          investigation_notes: notes,
-          classification_notes: notes,
-          classified_by: classifiedBy,
-          classified_at: now
-        })
-        .eq('id', bugId);
-      if (!error) return true;
+  async classify(
+    bugId: string, 
+    classification: DefectClassification, 
+    justification: string, 
+    reviewerId: string, 
+    reviewerName: string
+  ): Promise<{ success: boolean; error?: string }> {
+    // Require written justification for classifications that exempt a defect from deduction eligibility
+    const isExempt = classification === 'scope_change' || 
+                     classification === 'external_dependency_issue' || 
+                     classification === 'not_caused_by_original_delivery';
+
+    if (isExempt && (!justification || justification.trim().length < 5)) {
+      return {
+        success: false,
+        error: 'Written justification is required for classifications that exempt a defect from deduction eligibility.'
+      };
     }
-    const bugs = StorageService.getBugs().map(b => b.id === bugId ? {
+
+    const now = new Date().toISOString();
+    const bugs = StorageService.getBugs();
+    const bug = bugs.find(b => b.id === bugId);
+    if (!bug) return { success: false, error: 'Bug not found' };
+
+    const updatedBugs = bugs.map(b => b.id === bugId ? {
       ...b,
       defect_classification: classification,
-      classification_notes: notes,
-      classified_by: classifiedBy,
-      classified_at: now
+      attribution_classification: classification,
+      classification_notes: justification,
+      classification_justification: justification,
+      classified_by: reviewerId,
+      classified_at: now,
+      updated_at: now
     } : b);
-    StorageService.setBugs(bugs);
-    return true;
+    StorageService.setBugs(updatedBugs);
+
+    // Record immutable attribution decision history
+    const attributionRecord: BugAttributionRecord = {
+      id: `bah-${Date.now()}`,
+      bug_id: bugId,
+      reviewer_id: reviewerId,
+      reviewer_name: reviewerName,
+      classification: classification,
+      justification: justification,
+      created_at: now
+    };
+    const attributions = StorageService.getBugAttributions();
+    StorageService.setBugAttributions([attributionRecord, ...attributions]);
+
+    // Update attribution on all linked corrective time logs
+    let targetAttribution: AttributionStatus = 'pending';
+    if (classification === 'original_delivery_defect' || classification === 'caused_by_original_delivery') {
+      targetAttribution = 'attributable';
+    } else if (isExempt) {
+      targetAttribution = 'exempt';
+    }
+
+    const logs = StorageService.getTimeLogs();
+    const updatedLogs = logs.map(l => {
+      if (l.bug_id === bugId) {
+        return {
+          ...l,
+          attribution_status: targetAttribution,
+          exempt_reason: isExempt ? justification : l.exempt_reason,
+          updated_at: now
+        };
+      }
+      return l;
+    });
+    StorageService.setTimeLogs(updatedLogs);
+
+    return { success: true };
+  },
+
+  async verifyFix(
+    bugId: string, 
+    passed: boolean, 
+    notes: string, 
+    reviewerId: string, 
+    reviewerName: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const bugs = StorageService.getBugs();
+    const bug = bugs.find(b => b.id === bugId);
+    if (!bug) return { success: false, error: 'Bug not found' };
+
+    const now = new Date().toISOString();
+    const updatedStatus: BugStatus = passed ? 'verified_resolved' : 'in_fix';
+    const updatedVerification: 'passed' | 'failed' = passed ? 'passed' : 'failed';
+
+    const updatedBugs: BugReport[] = bugs.map(b => b.id === bugId ? {
+      ...b,
+      status: updatedStatus,
+      fix_verification_status: updatedVerification,
+      verified_by: reviewerId,
+      verification_notes: notes,
+      updated_at: now
+    } : b);
+    StorageService.setBugs(updatedBugs);
+
+    // If verification failed, return the task to Under Fix
+    const targetTaskId = bug.original_task_id || bug.task_id;
+    if (targetTaskId) {
+      if (!passed) {
+        await tasksApi.startFix(targetTaskId, reviewerId, `${reviewerName}: Verification failed. Notes: ${notes}`);
+      } else {
+        // If passed, check if all bugs for this task are verified
+        const taskBugs = updatedBugs.filter(b => b.original_task_id === targetTaskId || b.task_id === targetTaskId);
+        const allResolved = taskBugs.every(b => b.status === 'verified_resolved' || b.status === 'closed');
+        if (allResolved) {
+          await tasksApi.close(targetTaskId, `All ${taskBugs.length} linked bugs verified and passed by ${reviewerName}`, reviewerId, reviewerName);
+        }
+      }
+    }
+
+    return { success: true };
+  },
+
+  getAttributionHistory(bugId?: string): BugAttributionRecord[] {
+    const list = StorageService.getBugAttributions();
+    if (bugId) {
+      return list.filter(a => a.bug_id === bugId);
+    }
+    return list;
   }
 };
 
@@ -314,50 +594,152 @@ export const timeLogsApi = {
     return StorageService.getTimeLogs();
   },
 
-  async create(log: Omit<TimeLog, 'id' | 'created_at' | 'approval_status' | 'attribution_status'>): Promise<TimeLog | null> {
+  async create(log: Omit<TimeLog, 'id' | 'created_at' | 'approval_status' | 'attribution_status'>): Promise<{ success: boolean; log?: TimeLog; error?: string }> {
+    // Validations:
+    // 1. Hours must be greater than zero and within daily maximum (16h)
+    if (!log.hours || log.hours <= 0) {
+      return { success: false, error: 'Hours worked must be greater than zero.' };
+    }
+    if (log.hours > 16) {
+      return { success: false, error: 'Hours worked exceeds configurable daily maximum of 16.0 hours.' };
+    }
+
+    // 2. Work date cannot be empty or future
+    const todayStr = new Date().toISOString().split('T')[0];
+    const logDate = log.date || log.work_date || todayStr;
+    if (logDate > todayStr) {
+      return { success: false, error: 'Work date cannot be set in the future.' };
+    }
+
+    // 3. For corrective maintenance, validate bug and task relationship
+    const isCorrective = log.log_type === 'corrective_maintenance' || log.work_type === 'corrective_maintenance';
+    if (isCorrective) {
+      if (!log.bug_id) {
+        return { success: false, error: 'Corrective maintenance time logs require selecting a linked defect.' };
+      }
+      const bugs = StorageService.getBugs();
+      const linkedBug = bugs.find(b => b.id === log.bug_id);
+      if (!linkedBug) {
+        return { success: false, error: 'Selected bug does not exist.' };
+      }
+      if (linkedBug.original_task_id && linkedBug.original_task_id !== log.task_id && linkedBug.task_id !== log.task_id) {
+        return { success: false, error: 'The selected bug does not belong to the chosen task.' };
+      }
+    }
+
+    // Determine initial attribution status
+    let initialAttribution: AttributionStatus = 'exempt';
+    if (isCorrective) {
+      initialAttribution = 'pending';
+      if (log.bug_id) {
+        const bug = StorageService.getBugs().find(b => b.id === log.bug_id);
+        if (bug) {
+          if (bug.defect_classification === 'original_delivery_defect' || bug.defect_classification === 'caused_by_original_delivery') {
+            initialAttribution = 'attributable';
+          } else if (bug.defect_classification === 'scope_change' || bug.defect_classification === 'external_dependency_issue' || bug.defect_classification === 'not_caused_by_original_delivery') {
+            initialAttribution = 'exempt';
+          }
+        }
+      }
+    }
+
     const newLog: TimeLog = {
       ...log,
       id: `log-${Date.now()}`,
+      employee_id: log.employee_id || log.user_id,
+      user_id: log.user_id || log.employee_id || '',
+      date: logDate,
+      work_date: logDate,
+      log_type: isCorrective ? 'corrective_maintenance' : 'regular',
+      work_type: isCorrective ? 'corrective_maintenance' : 'regular',
       approval_status: 'pending',
-      attribution_status: log.log_type === 'corrective_maintenance' ? 'pending' : 'exempt',
+      attribution_status: initialAttribution,
+      is_payroll_processed: false,
       created_at: new Date().toISOString()
     };
+
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from('time_logs').insert(newLog).select().single();
-      if (!error && data) return data;
+      await supabase.from('time_logs').insert(newLog);
     }
+
     const current = StorageService.getTimeLogs();
     StorageService.setTimeLogs([newLog, ...current]);
-    return newLog;
+
+    // Transition task to under_fix if corrective work began on a reopened task
+    if (isCorrective && log.task_id) {
+      const tasks = StorageService.getTasks();
+      const task = tasks.find(t => t.id === log.task_id);
+      if (task && (task.status === 'reopened' || task.status === 'assigned')) {
+        await tasksApi.startFix(task.id, newLog.user_id, 'Automatic transition to Under Fix upon logging corrective maintenance time');
+      }
+    }
+
+    return { success: true, log: newLog };
   },
 
-  async review(logId: string, status: ApprovalStatus, reviewerId: string, attributionStatus?: AttributionStatus, reason?: string): Promise<boolean> {
-    const now = new Date().toISOString();
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase
-        .from('time_logs')
-        .update({
-          approval_status: status,
-          reviewer_id: reviewerId,
-          review_timestamp: now,
-          attribution_status: attributionStatus,
-          rejection_reason: status === 'rejected' ? reason : null,
-          exempt_reason: attributionStatus === 'exempt' ? reason : null
-        })
-        .eq('id', logId);
-      if (!error) return true;
+  async review(
+    logId: string, 
+    status: ApprovalStatus, 
+    reviewerId: string, 
+    reviewerName: string, 
+    attributionStatus?: AttributionStatus, 
+    reason?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const logs = StorageService.getTimeLogs();
+    const target = logs.find(l => l.id === logId);
+    if (!target) return { success: false, error: 'Time log not found' };
+
+    // Prevent modification if payroll has already been finalized
+    if (target.is_payroll_processed) {
+      return { success: false, error: 'Cannot modify time log: This entry has already been processed and locked in finalized payroll.' };
     }
-    const logs = StorageService.getTimeLogs().map(l => l.id === logId ? {
+
+    // SELF-APPROVAL ENFORCEMENT: Unauthorized users cannot approve their own logs!
+    const targetUserId = target.employee_id || target.user_id;
+    if (status === 'approved' && targetUserId === reviewerId) {
+      return { success: false, error: 'Unauthorized: Users cannot approve their own time logs.' };
+    }
+
+    const now = new Date().toISOString();
+    const updatedLogs = logs.map(l => l.id === logId ? {
       ...l,
       approval_status: status,
       approved_by: reviewerId,
+      reviewer_id: reviewerId,
+      reviewer_name: reviewerName,
       approved_at: now,
+      review_timestamp: now,
       attribution_status: attributionStatus || l.attribution_status,
       rejection_reason: status === 'rejected' ? reason : undefined,
-      exempt_reason: attributionStatus === 'exempt' ? reason : l.exempt_reason
+      exempt_reason: attributionStatus === 'exempt' ? reason : l.exempt_reason,
+      updated_at: now
     } : l);
-    StorageService.setTimeLogs(logs);
-    return true;
+
+    StorageService.setTimeLogs(updatedLogs);
+    return { success: true };
+  },
+
+  async resubmit(logId: string, newHours: number, newDescription: string): Promise<{ success: boolean; error?: string }> {
+    const logs = StorageService.getTimeLogs();
+    const target = logs.find(l => l.id === logId);
+    if (!target) return { success: false, error: 'Time log not found' };
+
+    if (newHours <= 0 || newHours > 16) {
+      return { success: false, error: 'Hours must be greater than zero and at most 16 hours.' };
+    }
+
+    const now = new Date().toISOString();
+    const updatedLogs = logs.map(l => l.id === logId ? {
+      ...l,
+      hours: newHours,
+      description: newDescription,
+      approval_status: 'pending' as const,
+      rejection_reason: undefined,
+      updated_at: now
+    } : l);
+
+    StorageService.setTimeLogs(updatedLogs);
+    return { success: true };
   }
 };
 

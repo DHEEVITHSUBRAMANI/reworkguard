@@ -12,9 +12,13 @@ import {
   DefectClassification,
   ApprovalStatus,
   AttributionStatus,
+  TaskStatus,
+  TaskStateHistory,
+  BugAttributionRecord,
   User
 } from '../types';
 import { StorageService } from '../services/storage';
+import { tasksApi, bugsApi, timeLogsApi } from '../services/api';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 
@@ -24,6 +28,8 @@ interface AppContextType {
   tasks: Task[];
   bugs: BugReport[];
   timeLogs: TimeLog[];
+  taskStateHistory: TaskStateHistory[];
+  bugAttributions: BugAttributionRecord[];
   policy: PayrollPolicy;
   payrollRecords: PayrollRecord[];
   auditLogs: AuditLog[];
@@ -43,23 +49,28 @@ interface AppContextType {
   
   addTask: (data: Omit<Task, 'id' | 'created_at' | 'corrective_hours' | 'actual_regular_hours'>) => void;
   updateTask: (id: string, data: Partial<Task>) => void;
-  completeTask: (id: string) => void;
-  reopenTask: (id: string, reason?: string) => void;
+  updateTaskStatus: (taskId: string, newStatus: TaskStatus, reason: string) => Promise<{ success: boolean; error?: string }>;
+  completeTask: (id: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
+  startCorrectiveWork: (id: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
+  reopenTask: (id: string, reason?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
+  closeTask: (id: string, reason?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
   
-  addBugReport: (data: Omit<BugReport, 'id' | 'created_at'>) => void;
+  addBugReport: (data: Omit<BugReport, 'id' | 'created_at'>) => Promise<{ success: boolean; bug?: BugReport; error?: string }>;
   classifyDefect: (
     bugId: string, 
     classification: DefectClassification, 
-    notes: string
-  ) => void;
+    justification: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  verifyBugFix: (bugId: string, passed: boolean, notes: string) => Promise<{ success: boolean; error?: string }>;
   
-  addTimeLog: (data: Omit<TimeLog, 'id' | 'created_at' | 'approval_status' | 'attribution_status'>) => void;
+  addTimeLog: (data: Omit<TimeLog, 'id' | 'created_at' | 'approval_status' | 'attribution_status'>) => Promise<{ success: boolean; log?: TimeLog; error?: string }>;
   reviewTimeLog: (
     logId: string, 
     status: ApprovalStatus, 
     attributionStatus?: AttributionStatus,
     reason?: string
-  ) => void;
+  ) => Promise<{ success: boolean; error?: string }>;
+  resubmitTimeLog: (logId: string, hours: number, description: string) => Promise<{ success: boolean; error?: string }>;
   
   updatePolicy: (policy: PayrollPolicy) => void;
   calculatePayrollForMonth: (targetMonth: string, sourceMonth: string) => void;
@@ -80,6 +91,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [tasks, setTasks] = useState<Task[]>(() => StorageService.getTasks());
   const [bugs, setBugs] = useState<BugReport[]>(() => StorageService.getBugs());
   const [timeLogs, setTimeLogs] = useState<TimeLog[]>(() => StorageService.getTimeLogs());
+  const [taskStateHistory, setTaskStateHistory] = useState<TaskStateHistory[]>(() => StorageService.getTaskStateHistory());
+  const [bugAttributions, setBugAttributions] = useState<BugAttributionRecord[]>(() => StorageService.getBugAttributions());
   const [policy, setPolicyState] = useState<PayrollPolicy>(() => StorageService.getPolicy());
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>(() => StorageService.getPayroll());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => StorageService.getAuditLogs());
@@ -223,208 +236,214 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('TASK_UPDATED', 'task', id, `Updated task details`);
   };
 
-  const completeTask = (id: string) => {
-    const task = tasks.find(t => t.id === id);
-    if (!task) return;
-    const now = new Date().toISOString();
-    const updated = tasks.map(t => t.id === id ? {
-      ...t,
-      status: 'completed' as const,
-      completed_at: now,
-      delivered_at: now,
-    } : t);
-    setTasks(updated);
-    StorageService.setTasks(updated);
-    addAuditLog('TASK_COMPLETED', 'task', id, `Marked task "${task.title}" as delivered & completed`);
-    addNotification('all', 'Task Delivered', `Task "${task.title}" was marked as completed and delivered.`, 'success', '/tasks');
+  // Tasks Lifecycle
+  const completeTask = async (id: string) => {
+    const res = await tasksApi.complete(id, currentUser.id, currentUser.full_name);
+    if (!res.success) return res;
+    setTasks(StorageService.getTasks());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
+    addAuditLog('TASK_COMPLETED', 'task', id, `Marked task as delivered & completed. On-time: ${res.task?.is_delivered_on_time ? 'YES' : 'NO'}`);
+    addNotification('all', 'Task Delivered', `Task was marked as completed and delivered.`, 'success', '/tasks');
+    return res;
   };
 
-  const reopenTask = (id: string, reason?: string) => {
-    const task = tasks.find(t => t.id === id);
-    if (!task) return;
-    const updated = tasks.map(t => t.id === id ? {
-      ...t,
-      status: 'reopened' as const,
-    } : t);
+  const updateTaskStatus = async (taskId: string, newStatus: TaskStatus, reason: string) => {
+    if (newStatus === 'completed') {
+      return await completeTask(taskId);
+    }
+    if (newStatus === 'reopened') {
+      return await reopenTask(taskId, reason);
+    }
+    if (newStatus === 'under_fix') {
+      return await startCorrectiveWork(taskId);
+    }
+    if (newStatus === 'closed') {
+      return await closeTask(taskId, reason);
+    }
+    // Generic status transition (e.g. assigned -> in_progress)
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return { success: false, error: 'Task not found' };
+
+    const now = new Date().toISOString();
+    const updated = tasks.map(t => t.id === taskId ? { ...t, status: newStatus, updated_at: now } : t);
     setTasks(updated);
     StorageService.setTasks(updated);
-    addAuditLog('TASK_REOPENED', 'task', id, `Task "${task.title}" reopened. Reason: ${reason || 'Post-delivery defect'}`);
-    addNotification(task.assigned_to, 'Task Reopened', `Task "${task.title}" was reopened for corrective work.`, 'danger', '/tasks');
+
+    const stateRecord: TaskStateHistory = {
+      id: `tsh-${Date.now()}`,
+      task_id: taskId,
+      previous_status: task.status,
+      new_status: newStatus,
+      actor_id: currentUser.id,
+      actor_name: currentUser.full_name,
+      reason: reason || `Transitioned to ${newStatus}`,
+      timestamp: now,
+    };
+    const history = [stateRecord, ...StorageService.getTaskStateHistory()];
+    setTaskStateHistory(history);
+    StorageService.setTaskStateHistory(history);
+
+    addAuditLog('TASK_STATUS_CHANGED', 'task', taskId, `Status changed from ${task.status} to ${newStatus}: ${reason}`);
+    return { success: true };
+  };
+
+  const startCorrectiveWork = async (id: string) => {
+    const res = await tasksApi.startFix(id, currentUser.id, currentUser.full_name);
+    if (!res.success) return res;
+    setTasks(StorageService.getTasks());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
+    addAuditLog('TASK_CORRECTIVE_WORK_STARTED', 'task', id, `Commenced corrective rework`);
+    return res;
+  };
+
+  const reopenTask = async (id: string, reason?: string) => {
+    const res = await tasksApi.reopen(id, reason || 'Post-delivery defect detected', currentUser.id, currentUser.full_name);
+    if (!res.success) return res;
+    setTasks(StorageService.getTasks());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
+    addAuditLog('TASK_REOPENED', 'task', id, `Task reopened. Reason: ${reason || 'Post-delivery defect'}`);
+    if (res.task?.assigned_to) {
+      addNotification(res.task.assigned_to, 'Task Reopened', `Task "${res.task.title}" was reopened for corrective work.`, 'danger', '/tasks');
+    }
+    return res;
+  };
+
+  const closeTask = async (id: string, reason?: string) => {
+    const res = await tasksApi.close(id, reason || 'Verified and approved for release', currentUser.id, currentUser.full_name);
+    if (!res.success) return res;
+    setTasks(StorageService.getTasks());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
+    addAuditLog('TASK_CLOSED', 'task', id, `Task officially closed. Reason: ${reason || 'Verified'}`);
+    return res;
   };
 
   // Bug Reports & Classification
-  const addBugReport = (data: Omit<BugReport, 'id' | 'created_at'>) => {
-    const newBug: BugReport = {
-      ...data,
-      id: `bug-${Date.now()}`,
-      created_at: new Date().toISOString(),
-    };
-    const updated = [newBug, ...bugs];
-    setBugs(updated);
-    StorageService.setBugs(updated);
-    addAuditLog('BUG_REPORTED', 'bug', newBug.id, `Reported bug "${newBug.title}" with severity ${newBug.severity}`);
+  const addBugReport = async (data: Omit<BugReport, 'id' | 'created_at'>) => {
+    const res = await bugsApi.create(data, currentUser.id, currentUser.full_name);
+    if (!res.success) return res;
+    setBugs(StorageService.getBugs());
+    setTasks(StorageService.getTasks());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
+    setModules(StorageService.getModules());
 
-    // If linked to a delivered module, prompt reopen
-    if (newBug.module_id) {
-      const mod = modules.find(m => m.id === data.module_id);
+    addAuditLog('BUG_REPORTED', 'bug', res.bug!.id, `Reported defect "${res.bug!.title}" with severity ${res.bug!.severity}`);
+
+    // Reopen module if it was delivered
+    if (res.bug!.module_id) {
+      const mod = modules.find(m => m.id === res.bug!.module_id);
       if (mod && mod.status === 'delivered') {
-        reopenModule(mod.id, `Bug reported: ${data.title}`);
+        reopenModule(mod.id, `Bug reported: ${res.bug!.title}`);
       }
     }
-    // If linked to a completed task, reopen task
-    if (newBug.task_id) {
-      reopenTask(newBug.task_id, `Bug reported: ${data.title}`);
-    }
 
-    addNotification('all', 'New Bug Reported', `Bug reported: "${newBug.title}" (${newBug.severity.toUpperCase()})`, 'warning', '/bugs');
+    addNotification(
+      res.bug!.original_developer_id || 'all',
+      'Defect Reported on Delivered Work',
+      `Bug reported: "${res.bug!.title}" (${res.bug!.severity.toUpperCase()}). Original task has been reopened.`,
+      'danger',
+      '/bugs'
+    );
+    return res;
   };
 
-  const classifyDefect = (
+  const classifyDefect = async (
     bugId: string, 
     classification: DefectClassification, 
-    notes: string
+    justification: string
   ) => {
-    const bug = bugs.find(b => b.id === bugId);
-    if (!bug) return;
+    const res = await bugsApi.classify(bugId, classification, justification, currentUser.id, currentUser.full_name);
+    if (!res.success) return res;
 
-    const now = new Date().toISOString();
-    const updatedBugs = bugs.map(b => b.id === bugId ? {
-      ...b,
-      defect_classification: classification,
-      classification_notes: notes,
-      classified_by: currentUser.id,
-      classified_at: now,
-    } : b);
-    setBugs(updatedBugs);
-    StorageService.setBugs(updatedBugs);
+    setBugs(StorageService.getBugs());
+    setBugAttributions(StorageService.getBugAttributions());
+    setTimeLogs(StorageService.getTimeLogs());
 
-    // Update attribution on all linked corrective time logs
-    let targetAttribution: AttributionStatus = 'pending';
-    if (classification === 'caused_by_original_delivery') {
-      targetAttribution = 'attributable';
-    } else if (classification === 'not_caused_by_original_delivery') {
-      targetAttribution = 'exempt';
-    }
-
-    const updatedLogs = timeLogs.map(l => {
-      if (l.bug_id === bugId) {
-        return {
-          ...l,
-          attribution_status: targetAttribution,
-          exempt_reason: classification === 'not_caused_by_original_delivery' ? notes : l.exempt_reason,
-        };
-      }
-      return l;
-    });
-    setTimeLogs(updatedLogs);
-    StorageService.setTimeLogs(updatedLogs);
-
-    const classificationLabels: Record<DefectClassification, string> = {
-      caused_by_original_delivery: 'Caused by original delivery (Attributable)',
-      not_caused_by_original_delivery: 'Not caused by original delivery (Exempt)',
-      pending_investigation: 'Pending investigation',
-    };
-
-    addAuditLog('DEFECT_CLASSIFIED', 'bug', bugId, `Defect classified as "${classificationLabels[classification]}". Notes: ${notes}`);
-
-    if (bug.original_developer_id) {
-      const isAttr = classification === 'caused_by_original_delivery';
+    addAuditLog('DEFECT_CLASSIFIED', 'bug', bugId, `Defect classified as "${classification}". Justification: ${justification}`);
+    
+    const bug = StorageService.getBugs().find(b => b.id === bugId);
+    if (bug && bug.original_developer_id) {
+      const isAttr = classification === 'original_delivery_defect' || classification === 'caused_by_original_delivery';
       addNotification(
         bug.original_developer_id,
         `Defect Classified: ${bug.title}`,
-        `Manager ${currentUser.full_name} classified Bug #${bugId} as: ${classificationLabels[classification]}. ${isAttr ? 'Associated corrective hours will be considered for payroll deduction review.' : 'Associated hours are exempt from payroll deduction.'}`,
+        `Manager ${currentUser.full_name} classified Bug #${bugId} as ${classification}. ${isAttr ? 'Corrective hours are eligible for next-month payroll deduction.' : 'Associated hours are exempt from payroll deduction.'}`,
         isAttr ? 'danger' : 'info',
         '/bugs'
       );
     }
+    return res;
+  };
+
+  const verifyBugFix = async (bugId: string, passed: boolean, notes: string) => {
+    const res = await bugsApi.verifyFix(bugId, passed, notes, currentUser.id, currentUser.full_name);
+    if (!res.success) return res;
+
+    setBugs(StorageService.getBugs());
+    setTasks(StorageService.getTasks());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
+
+    addAuditLog(
+      passed ? 'BUG_FIX_VERIFIED' : 'BUG_FIX_REJECTED',
+      'bug',
+      bugId,
+      `Fix verification ${passed ? 'PASSED' : 'FAILED'}: ${notes}`
+    );
+    return res;
   };
 
   // Time Logs
-  const addTimeLog = (data: Omit<TimeLog, 'id' | 'created_at' | 'approval_status' | 'attribution_status'>) => {
-    // Determine initial attribution status
-    let attributionStatus: AttributionStatus = 'exempt';
-    if (data.log_type === 'corrective_maintenance') {
-      attributionStatus = 'pending';
-      if (data.bug_id) {
-        const bug = bugs.find(b => b.id === data.bug_id);
-        if (bug) {
-          if (bug.defect_classification === 'caused_by_original_delivery') {
-            attributionStatus = 'attributable';
-          } else if (bug.defect_classification === 'not_caused_by_original_delivery') {
-            attributionStatus = 'exempt';
-          }
-        }
-      }
-    }
+  const addTimeLog = async (data: Omit<TimeLog, 'id' | 'created_at' | 'approval_status' | 'attribution_status'>) => {
+    const res = await timeLogsApi.create(data);
+    if (!res.success) return res;
 
-    const newLog: TimeLog = {
-      ...data,
-      id: `log-${Date.now()}`,
-      approval_status: 'pending',
-      attribution_status: attributionStatus,
-      created_at: new Date().toISOString(),
-    };
+    setTimeLogs(StorageService.getTimeLogs());
+    setTasks(StorageService.getTasks());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
 
-    const updated = [newLog, ...timeLogs];
-    setTimeLogs(updated);
-    StorageService.setTimeLogs(updated);
-
-    // Update task hour totals
-    const task = tasks.find(t => t.id === data.task_id);
-    if (task) {
-      if (data.log_type === 'regular') {
-        updateTask(task.id, { actual_regular_hours: (task.actual_regular_hours || 0) + data.hours });
-      } else {
-        updateTask(task.id, { corrective_hours: (task.corrective_hours || 0) + data.hours });
-      }
-    }
-
-    addAuditLog('TIME_LOGGED', 'time_log', newLog.id, `Logged ${data.hours} hours (${data.log_type}) for task`);
-    addNotification('all', 'New Time Log Submitted', `${currentUser.full_name} submitted ${data.hours} hrs (${data.log_type.replace('_', ' ')}) for approval.`, 'info', '/approvals');
+    addAuditLog('TIME_LOGGED', 'time_log', res.log!.id, `Logged ${res.log!.hours}h (${res.log!.log_type}) on task`);
+    addNotification('all', 'New Time Log Submitted', `${currentUser.full_name} submitted ${res.log!.hours} hrs (${res.log!.log_type.replace('_', ' ')}) for approval.`, 'info', '/approvals');
+    return res;
   };
 
-  const reviewTimeLog = (
+  const reviewTimeLog = async (
     logId: string, 
     status: ApprovalStatus, 
     attributionStatus?: AttributionStatus,
     reason?: string
   ) => {
-    const target = timeLogs.find(l => l.id === logId);
-    if (!target) return;
+    const res = await timeLogsApi.review(logId, status, currentUser.id, currentUser.full_name, attributionStatus, reason);
+    if (!res.success) return res;
 
-    const now = new Date().toISOString();
-    const updated = timeLogs.map(l => {
-      if (l.id === logId) {
-        return {
-          ...l,
-          approval_status: status,
-          approved_by: currentUser.id,
-          approved_at: now,
-          attribution_status: attributionStatus || l.attribution_status,
-          rejection_reason: status === 'rejected' ? reason : undefined,
-          exempt_reason: attributionStatus === 'exempt' ? reason : l.exempt_reason,
-        };
-      }
-      return l;
-    });
+    setTimeLogs(StorageService.getTimeLogs());
 
-    setTimeLogs(updated);
-    StorageService.setTimeLogs(updated);
+    const target = StorageService.getTimeLogs().find(l => l.id === logId);
+    if (target) {
+      addAuditLog(
+        status === 'approved' ? 'TIME_LOG_APPROVED' : 'TIME_LOG_REJECTED',
+        'time_log',
+        logId,
+        `${status.toUpperCase()} ${target.hours}h log (${target.log_type}). Attribution: ${attributionStatus || target.attribution_status}`
+      );
 
-    addAuditLog(
-      status === 'approved' ? 'TIME_LOG_APPROVED' : 'TIME_LOG_REJECTED',
-      'time_log',
-      logId,
-      `${status === 'approved' ? 'Approved' : 'Rejected'} ${target.hours}h log (${target.log_type}) for ${target.user_id}. Attribution: ${attributionStatus || target.attribution_status}`
-    );
+      addNotification(
+        target.user_id,
+        `Time Log ${status.toUpperCase()}`,
+        `Your ${target.hours} hr ${target.log_type.replace('_', ' ')} log was ${status} by ${currentUser.full_name}.`,
+        status === 'approved' ? 'success' : 'danger',
+        '/time'
+      );
+    }
+    return res;
+  };
 
-    addNotification(
-      target.user_id,
-      `Time Log ${status.toUpperCase()}`,
-      `Your ${target.hours} hr ${target.log_type.replace('_', ' ')} log was ${status} by ${currentUser.full_name}.`,
-      status === 'approved' ? 'success' : 'danger',
-      '/time'
-    );
+  const resubmitTimeLog = async (logId: string, hours: number, description: string) => {
+    const res = await timeLogsApi.resubmit(logId, hours, description);
+    if (!res.success) return res;
+
+    setTimeLogs(StorageService.getTimeLogs());
+    addAuditLog('TIME_LOG_RESUBMITTED', 'time_log', logId, `Resubmitted log with ${hours}h: "${description}"`);
+    addNotification('all', 'Time Log Resubmitted', `${currentUser.full_name} resubmitted a time log for review.`, 'info', '/approvals');
+    return res;
   };
 
   // Policy
@@ -547,6 +566,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTasks(StorageService.getTasks());
     setBugs(StorageService.getBugs());
     setTimeLogs(StorageService.getTimeLogs());
+    setTaskStateHistory(StorageService.getTaskStateHistory());
+    setBugAttributions(StorageService.getBugAttributions());
     setPolicyState(StorageService.getPolicy());
     setPayrollRecords(StorageService.getPayroll());
     setAuditLogs(StorageService.getAuditLogs());
@@ -561,6 +582,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         tasks,
         bugs,
         timeLogs,
+        taskStateHistory,
+        bugAttributions,
         policy,
         payrollRecords,
         auditLogs,
@@ -577,12 +600,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reopenModule,
         addTask,
         updateTask,
+        updateTaskStatus,
         completeTask,
+        startCorrectiveWork,
         reopenTask,
+        closeTask,
         addBugReport,
         classifyDefect,
+        verifyBugFix,
         addTimeLog,
         reviewTimeLog,
+        resubmitTimeLog,
         updatePolicy,
         calculatePayrollForMonth,
         finalizePayrollRecord,

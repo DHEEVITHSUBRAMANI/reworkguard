@@ -55,7 +55,15 @@ export interface Module {
 }
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
-export type TaskStatus = 'backlog' | 'in_progress' | 'in_review' | 'completed' | 'reopened';
+export type TaskStatus = 
+  | 'assigned' 
+  | 'in_progress' 
+  | 'completed' 
+  | 'reopened' 
+  | 'under_fix' 
+  | 'closed' 
+  | 'backlog' 
+  | 'in_review';
 
 export interface Task {
   id: string;
@@ -70,6 +78,7 @@ export interface Task {
   committed_due_date?: string;
   actual_completion_date?: string;
   closure_date?: string;
+  is_delivered_on_time?: boolean;
   original_delivery_ref?: string;
   created_by: string;
   priority: TaskPriority;
@@ -77,6 +86,9 @@ export interface Task {
   estimated_hours: number;
   actual_regular_hours: number;
   corrective_hours: number;
+  fix_verification_status?: 'pending' | 'passed' | 'failed';
+  verified_by?: string;
+  verification_notes?: string;
   delivered_at?: string;
   completed_at?: string;
   created_at: string;
@@ -105,7 +117,13 @@ export interface TaskStateHistory {
 
 export type BugSeverity = 'critical' | 'high' | 'medium' | 'low';
 export type BugStatus = 'open' | 'investigating' | 'in_fix' | 'verified_resolved' | 'closed';
-export type DefectClassification = 'caused_by_original_delivery' | 'not_caused_by_original_delivery' | 'pending_investigation';
+export type DefectClassification = 
+  | 'original_delivery_defect' 
+  | 'scope_change' 
+  | 'external_dependency_issue' 
+  | 'pending_investigation'
+  | 'caused_by_original_delivery' 
+  | 'not_caused_by_original_delivery';
 
 export interface BugReport {
   id: string;
@@ -126,17 +144,31 @@ export interface BugReport {
   defect_classification: DefectClassification;
   attribution_classification?: DefectClassification;
   classification_notes?: string;
+  classification_justification?: string;
   investigation_notes?: string;
   classified_by?: string;
   classified_at?: string;
+  fix_verification_status?: 'pending' | 'passed' | 'failed';
+  verified_by?: string;
+  verification_notes?: string;
   created_at: string;
   updated_at?: string;
 }
 
 export type Bug = BugReport;
 
+export interface BugAttributionRecord {
+  id: string;
+  bug_id: string;
+  reviewer_id: string;
+  reviewer_name: string;
+  classification: DefectClassification;
+  justification?: string;
+  created_at: string;
+}
+
 export type TimeLogType = 'regular' | 'corrective_maintenance';
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'exempt';
 export type AttributionStatus = 'attributable' | 'exempt' | 'pending';
 
 export interface TimeLog {

@@ -11,17 +11,21 @@ import {
   ExternalLink, 
   Calendar, 
   DollarSign, 
-  AlertCircle 
+  AlertCircle,
+  Users,
+  Wrench,
+  Check,
+  FileText
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
-import { formatCurrency, formatDate, cn } from '../lib/utils';
-import { Project, Module, ProjectStatus, ModuleStatus } from '../types';
+import { formatCurrency, formatDate, formatHours, cn } from '../lib/utils';
+import { Project, Module, ProjectStatus, ModuleStatus, Task } from '../types';
 
 export const Projects: React.FC = () => {
-  const { projects, modules, addProject, addModule, reopenModule, searchQuery } = useApp();
-  const { canCreateProject, isManager } = useAuth();
+  const { projects, modules, tasks, addProject, addModule, reopenModule, searchQuery } = useApp();
+  const { canCreateProject, isManager, users } = useAuth();
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
@@ -31,6 +35,7 @@ export const Projects: React.FC = () => {
   const [isModuleModalOpen, setIsModuleModalOpen] = useState(false);
   const [reopenTarget, setReopenTarget] = useState<Module | null>(null);
   const [reopenReason, setReopenReason] = useState('');
+  const [detailModule, setDetailModule] = useState<Module | null>(null);
 
   // Form states
   const [newProject, setNewProject] = useState({
@@ -122,6 +127,18 @@ export const Projects: React.FC = () => {
         return <Badge variant="default">Closed / Hold</Badge>;
     }
   };
+
+  // Detailed module helper data
+  const moduleTasks = detailModule 
+    ? tasks.filter(t => t.module_id === detailModule.id)
+    : [];
+
+  const moduleContributors = Array.from(
+    new Set(moduleTasks.map(t => t.original_delivery_employee_id || t.assigned_to).filter(Boolean))
+  ).map(id => users.find(u => u.id === id)).filter(Boolean);
+
+  const totalModuleRegularHours = moduleTasks.reduce((acc, t) => acc + (t.actual_regular_hours || 0), 0);
+  const totalModuleReworkHours = moduleTasks.reduce((acc, t) => acc + (t.corrective_hours || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -243,18 +260,21 @@ export const Projects: React.FC = () => {
                         <div
                           key={module.id}
                           className={cn(
-                            'p-4 rounded-lg border transition-all text-xs',
+                            'p-4 rounded-lg border transition-all text-xs cursor-pointer',
                             isReopened 
-                              ? 'bg-rose-50/40 border-rose-200' 
-                              : 'bg-white border-slate-200/80 hover:border-slate-300'
+                              ? 'bg-rose-50/40 border-rose-200 hover:border-rose-300' 
+                              : 'bg-white border-slate-200/80 hover:border-slate-300 hover:shadow-2xs'
                           )}
+                          onClick={() => setDetailModule(module)}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div>
                               <span className="font-mono text-[10px] font-bold text-slate-400">
                                 {module.code}
                               </span>
-                              <h5 className="font-bold text-slate-900 text-sm mt-0.5">{module.name}</h5>
+                              <h5 className="font-bold text-slate-900 text-sm mt-0.5 hover:text-blue-600 flex items-center gap-1.5">
+                                <span>{module.name}</span>
+                              </h5>
                             </div>
                             {getStatusBadge(module.status)}
                           </div>
@@ -283,7 +303,10 @@ export const Projects: React.FC = () => {
                               )}
                               {module.status === 'delivered' && (
                                 <button
-                                  onClick={() => setReopenTarget(module)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setReopenTarget(module);
+                                  }}
                                   className="text-rose-600 hover:text-rose-800 font-medium inline-flex items-center gap-1 underline text-[11px]"
                                 >
                                   <RotateCcw className="w-3 h-3" /> Reopen
@@ -311,58 +334,37 @@ export const Projects: React.FC = () => {
         <form onSubmit={handleCreateProject} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Project Name *</label>
-              <input
-                type="text"
-                required
-                value={newProject.name}
-                onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                placeholder="e.g. Apex Settlement Engine"
-                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Project Code *</label>
               <input
                 type="text"
                 required
                 value={newProject.code}
                 onChange={(e) => setNewProject({ ...newProject, code: e.target.value.toUpperCase() })}
-                placeholder="e.g. PRJ-APEX"
+                placeholder="e.g. FINTECH-PROD"
                 className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Client Name</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Client Name *</label>
               <input
                 type="text"
+                required
                 value={newProject.client_name}
                 onChange={(e) => setNewProject({ ...newProject, client_name: e.target.value })}
-                placeholder="e.g. Apex Global Banking"
-                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Budget ($)</label>
-              <input
-                type="number"
-                value={newProject.budget}
-                onChange={(e) => setNewProject({ ...newProject, budget: Number(e.target.value) })}
+                placeholder="e.g. Apex Global Bank"
                 className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
-            <textarea
-              rows={3}
-              value={newProject.description}
-              onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-              placeholder="High-level engineering scope and deliverables..."
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Project Name *</label>
+            <input
+              type="text"
+              required
+              value={newProject.name}
+              onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
+              placeholder="e.g. Enterprise Payment Gateway & Settlement Engine"
               className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -378,7 +380,7 @@ export const Projects: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Target End Date</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">End Date</label>
               <input
                 type="date"
                 value={newProject.end_date}
@@ -386,6 +388,17 @@ export const Projects: React.FC = () => {
                 className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
+            <textarea
+              rows={3}
+              value={newProject.description}
+              onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
+              placeholder="Scope of work, deliverable milestones, and key technical stack..."
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
           </div>
 
           <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
@@ -399,16 +412,16 @@ export const Projects: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Modal: Create Module */}
+      {/* Modal: Add Module */}
       <Modal
         isOpen={isModuleModalOpen}
         onClose={() => setIsModuleModalOpen(false)}
-        title="Add Project Module"
-        description="Define a feature module or milestone component under a project."
+        title="Add Functional Module"
+        description="Deconstruct a project into deliverable modules tracked for defect rates."
       >
         <form onSubmit={handleCreateModule} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Assign to Project *</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Parent Project *</label>
             <select
               value={newModule.project_id}
               onChange={(e) => setNewModule({ ...newModule, project_id: e.target.value })}
@@ -424,25 +437,25 @@ export const Projects: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Module Name *</label>
-              <input
-                type="text"
-                required
-                value={newModule.name}
-                onChange={(e) => setNewModule({ ...newModule, name: e.target.value })}
-                placeholder="e.g. Settlement Clearing Pipeline"
-                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Module Code *</label>
               <input
                 type="text"
                 required
                 value={newModule.code}
                 onChange={(e) => setNewModule({ ...newModule, code: e.target.value.toUpperCase() })}
-                placeholder="e.g. MOD-CLEARING"
+                placeholder="e.g. MOD-SETTLE"
                 className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Module Name *</label>
+              <input
+                type="text"
+                required
+                value={newModule.name}
+                onChange={(e) => setNewModule({ ...newModule, name: e.target.value })}
+                placeholder="e.g. Settlement Clearing Engine"
+                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -501,6 +514,112 @@ export const Projects: React.FC = () => {
             </Button>
             <Button variant="danger" size="sm" onClick={handleConfirmReopen}>
               Confirm Reopen
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Module Detail & Delivery Contributors Drawer */}
+      <Modal
+        isOpen={Boolean(detailModule)}
+        onClose={() => setDetailModule(null)}
+        title={detailModule?.name || 'Module Details & Contributors'}
+        description={`Code: ${detailModule?.code}`}
+      >
+        <div className="space-y-4 text-xs">
+          {/* Key Metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Status</span>
+              <div className="mt-1">{detailModule && getStatusBadge(detailModule.status)}</div>
+            </div>
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Reopen Count</span>
+              <span className={cn(
+                "font-mono font-bold text-sm block mt-1",
+                (detailModule?.reopen_count || 0) > 0 ? "text-rose-600" : "text-slate-800"
+              )}>
+                {detailModule?.reopen_count || 0} times
+              </span>
+            </div>
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Regular Hours</span>
+              <span className="font-mono font-bold text-sm text-slate-800 block mt-1">
+                {totalModuleRegularHours} hrs
+              </span>
+            </div>
+            <div className="p-3 bg-rose-50/70 border border-rose-200 rounded-lg">
+              <span className="text-[10px] uppercase font-bold text-rose-700 block">Rework Hours</span>
+              <span className="font-mono font-bold text-sm text-rose-700 block mt-1">
+                {totalModuleReworkHours} hrs
+              </span>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <span className="font-semibold text-slate-700 block mb-1">Module Description:</span>
+            <p className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-slate-700 leading-relaxed">
+              {detailModule?.description || 'No detailed description provided.'}
+            </p>
+          </div>
+
+          {/* Delivery Contributors */}
+          <div>
+            <span className="font-semibold text-slate-700 block mb-2 flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-slate-500" />
+              Delivery Contributors ({moduleContributors.length})
+            </span>
+            {moduleContributors.length === 0 ? (
+              <p className="text-slate-400 italic">No assigned delivery contributors recorded.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {moduleContributors.map((c) => (
+                  <div key={c?.id} className="p-2.5 border border-slate-200 rounded-lg flex items-center gap-2 bg-white">
+                    <img src={c?.avatar_url} alt={c?.full_name} className="w-7 h-7 rounded-full object-cover" />
+                    <div>
+                      <span className="font-semibold text-slate-800 block">{c?.full_name}</span>
+                      <span className="text-[10px] text-slate-400 capitalize">{c?.role} • ${c?.hourly_rate}/hr</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Tasks under module */}
+          <div>
+            <span className="font-semibold text-slate-700 block mb-2 flex items-center gap-1.5">
+              <Package className="w-4 h-4 text-slate-500" />
+              Tasks under this Module ({moduleTasks.length})
+            </span>
+            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto">
+              {moduleTasks.map((t) => (
+                <div key={t.id} className="p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2">
+                  <div>
+                    <span className="font-semibold text-slate-800">{t.title}</span>
+                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                      <span className="capitalize">{t.status.replace('_', ' ')}</span>
+                      <span>•</span>
+                      <span>{t.actual_regular_hours}h reg / {t.corrective_hours}h rework</span>
+                    </div>
+                  </div>
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded text-[10px] font-bold border uppercase",
+                    t.status === 'completed' || t.status === 'closed' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                    t.status === 'reopened' || t.status === 'under_fix' ? "bg-rose-50 text-rose-700 border-rose-200" :
+                    "bg-slate-100 text-slate-700 border-slate-200"
+                  )}>
+                    {t.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end">
+            <Button variant="outline" size="sm" onClick={() => setDetailModule(null)}>
+              Close
             </Button>
           </div>
         </div>

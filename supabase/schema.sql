@@ -508,3 +508,61 @@ INSERT INTO public.payroll_deduction_items (id, payroll_record_id, source_time_l
 ('di000003-0000-4000-e000-000000000003', 'pay00002-0000-4000-e000-000000000002', 'e0000004-0000-4000-e000-000000000004', 'c0000009-0000-4000-c000-000000000003', 'b0000007-0000-4000-b000-000000000003', 'd0000003-0000-4000-d000-000000000003', 3.00, 48.00, 144.00, 'PostGIS spatial query migration', 'Approved by Sarah Jenkins (2026-10-10)'),
 ('di000004-0000-4000-e000-000000000004', 'pay00002-0000-4000-e000-000000000002', 'e0000005-0000-4000-e000-000000000005', 'c0000009-0000-4000-c000-000000000003', 'b0000007-0000-4000-b000-000000000003', 'd0000003-0000-4000-d000-000000000003', 3.00, 48.00, 144.00, 'PostGIS spatial query benchmarking', 'Approved by Sarah Jenkins (2026-10-11)')
 ON CONFLICT (payroll_record_id, source_time_log_id) DO NOTHING;
+
+-- ============================================================================
+-- Section: Task Lifecycle, Verification & Bug Attribution History
+-- ============================================================================
+
+ALTER TABLE public.tasks 
+  ADD COLUMN IF NOT EXISTS is_delivered_on_time BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS fix_verification_status TEXT DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS verified_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS verification_notes TEXT;
+
+ALTER TABLE public.bugs
+  ADD COLUMN IF NOT EXISTS classification_justification TEXT,
+  ADD COLUMN IF NOT EXISTS fix_verification_status TEXT DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS verified_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS verification_notes TEXT;
+
+CREATE TABLE IF NOT EXISTS public.bug_attribution_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bug_id UUID NOT NULL REFERENCES public.bugs(id) ON DELETE CASCADE,
+  reviewer_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  reviewer_name TEXT NOT NULL,
+  classification defect_classification NOT NULL,
+  justification TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.bug_attribution_history ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow read access to all authenticated users on bug_attribution_history"
+  ON public.bug_attribution_history FOR SELECT
+  TO authenticated, anon
+  USING (true);
+
+CREATE POLICY "Allow insert by managers and leads on bug_attribution_history"
+  ON public.bug_attribution_history FOR INSERT
+  TO authenticated
+  WITH CHECK (public.is_team_lead_or_above());
+
+-- Trigger: Prevent Self-Approval on Time Logs
+CREATE OR REPLACE FUNCTION public.check_self_approval_on_time_log()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.approval_status = 'approved' AND (OLD.approval_status IS DISTINCT FROM 'approved') THEN
+    IF NEW.employee_id = NEW.reviewer_id THEN
+      RAISE EXCEPTION 'Self-approval is forbidden: Employee % cannot approve their own time log %.', NEW.employee_id, NEW.id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_check_self_approval_on_time_log ON public.time_logs;
+CREATE TRIGGER trg_check_self_approval_on_time_log
+  BEFORE UPDATE ON public.time_logs
+  FOR EACH ROW
+  EXECUTE FUNCTION public.check_self_approval_on_time_log();
+

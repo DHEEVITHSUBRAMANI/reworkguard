@@ -12,7 +12,9 @@ import {
   Wrench, 
   Code2, 
   FileText,
-  DollarSign
+  DollarSign,
+  RotateCcw,
+  AlertCircle
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -28,6 +30,7 @@ export const TimeTracking: React.FC = () => {
     projects, 
     bugs, 
     addTimeLog, 
+    resubmitTimeLog,
     selectedMonth, 
     searchQuery 
   } = useApp();
@@ -36,7 +39,11 @@ export const TimeTracking: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [approvalFilter, setApprovalFilter] = useState<string>('all');
   const [attributionFilter, setAttributionFilter] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'rejected'>('all');
+
+  // Modal: Log Time
   const [isTimeModalOpen, setIsTimeModalOpen] = useState(false);
+  const [timeError, setTimeError] = useState<string | null>(null);
 
   // Form State
   const [logType, setLogType] = useState<TimeLogType>('regular');
@@ -46,12 +53,48 @@ export const TimeTracking: React.FC = () => {
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState<string>('');
 
-  const handleLogTime = (e: React.FormEvent) => {
-    e.preventDefault();
-    const task = tasks.find(t => t.id === selectedTaskId);
-    if (!task) return;
+  // Modal: Resubmit Rejected Log
+  const [resubmitTarget, setResubmitTarget] = useState<TimeLog | null>(null);
+  const [resubmitHours, setResubmitHours] = useState<number>(4.0);
+  const [resubmitDescription, setResubmitDescription] = useState<string>('');
+  const [resubmitError, setResubmitError] = useState<string | null>(null);
 
-    addTimeLog({
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const handleOpenLogModal = () => {
+    setTimeError(null);
+    setIsTimeModalOpen(true);
+  };
+
+  const handleLogTime = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTimeError(null);
+
+    // Validation 1: Hours > 0 and <= 16
+    if (hours <= 0 || hours > 16) {
+      setTimeError('Hours logged must be between 0.5 and 16.0 hours per entry.');
+      return;
+    }
+
+    // Validation 2: No future dates
+    if (date > todayStr) {
+      setTimeError('Cannot log time for future dates.');
+      return;
+    }
+
+    const task = tasks.find(t => t.id === selectedTaskId);
+    if (!task) {
+      setTimeError('Please select a valid target task.');
+      return;
+    }
+
+    // Validation 3: If corrective, bug must be selected
+    if (logType === 'corrective_maintenance' && !selectedBugId) {
+      setTimeError('Corrective maintenance must be tied to a documented defect report.');
+      return;
+    }
+
+    const res = await addTimeLog({
       task_id: task.id,
       module_id: task.module_id,
       project_id: task.project_id,
@@ -63,13 +106,49 @@ export const TimeTracking: React.FC = () => {
       description,
     });
 
+    if (res && !res.success) {
+      setTimeError(res.error || 'Failed to submit time log.');
+      return;
+    }
+
     setIsTimeModalOpen(false);
     setDescription('');
     setHours(4.0);
   };
 
+  const handleOpenResubmit = (log: TimeLog) => {
+    setResubmitTarget(log);
+    setResubmitHours(log.hours);
+    setResubmitDescription(log.description);
+    setResubmitError(null);
+  };
+
+  const handleConfirmResubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resubmitTarget) return;
+
+    if (resubmitHours <= 0 || resubmitHours > 16) {
+      setResubmitError('Hours logged must be between 0.5 and 16.0 hours.');
+      return;
+    }
+
+    if (!resubmitDescription.trim()) {
+      setResubmitError('Please provide an updated description explaining the work or corrections made.');
+      return;
+    }
+
+    const res = await resubmitTimeLog(resubmitTarget.id, resubmitHours, resubmitDescription);
+    if (res && !res.success) {
+      setResubmitError(res.error || 'Failed to resubmit time log.');
+      return;
+    }
+
+    setResubmitTarget(null);
+  };
+
   // Metrics for active month
   const monthLogs = timeLogs.filter(l => l.date.startsWith(selectedMonth.slice(0, 7)) || l.date.startsWith('2026-10'));
+  
   const regularHoursTotal = monthLogs
     .filter(l => l.log_type === 'regular' && l.approval_status === 'approved')
     .reduce((sum, l) => sum + l.hours, 0);
@@ -82,8 +161,11 @@ export const TimeTracking: React.FC = () => {
     .filter(l => l.log_type === 'corrective_maintenance' && l.attribution_status === 'attributable' && l.approval_status === 'approved')
     .reduce((sum, l) => sum + l.hours, 0);
 
+  const rejectedLogs = timeLogs.filter(l => l.approval_status === 'rejected');
+
   // Filtered logs
   const filteredLogs = timeLogs.filter((l) => {
+    if (activeTab === 'rejected' && l.approval_status !== 'rejected') return false;
     const matchesSearch = l.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = typeFilter === 'all' || l.log_type === typeFilter;
     const matchesApproval = approvalFilter === 'all' || l.approval_status === approvalFilter;
@@ -99,6 +181,8 @@ export const TimeTracking: React.FC = () => {
         return <Badge variant="warning" dot>Pending Review</Badge>;
       case 'rejected':
         return <Badge variant="danger" dot>Rejected</Badge>;
+      case 'exempt':
+        return <Badge variant="info" dot>Exempt</Badge>;
     }
   };
 
@@ -159,13 +243,61 @@ export const TimeTracking: React.FC = () => {
             <div className="text-2xl font-bold text-rose-700">{attributableHoursTotal} hrs</div>
             <Badge variant="danger">Attributable</Badge>
           </div>
-          <span className="text-[11px] text-rose-600/80 mt-1 block">Attributable to original delivery defects</span>
+          <span className="text-[11px] text-rose-600/80 mt-1 block">Approved & attributable to original delivery defect</span>
         </div>
       </div>
+
+      {/* Rejected Logs Alert Notification */}
+      {rejectedLogs.length > 0 && activeTab !== 'rejected' && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>
+              You have <strong>{rejectedLogs.length} rejected time log(s)</strong> that require corrections and resubmission.
+            </span>
+          </div>
+          <button
+            onClick={() => setActiveTab('rejected')}
+            className="px-2.5 py-1 text-xs font-bold bg-rose-600 text-white rounded-md hover:bg-rose-700 transition-colors shadow-2xs"
+          >
+            Review Rejected Logs
+          </button>
+        </div>
+      )}
 
       {/* Filter and Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-2.5">
+          {/* Tab Selector */}
+          <div className="flex items-center gap-1 bg-slate-200/70 p-1 rounded-lg">
+            <button
+              onClick={() => setActiveTab('all')}
+              className={cn(
+                'px-3 py-1.5 rounded-md text-xs font-semibold transition-all',
+                activeTab === 'all' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+              )}
+            >
+              All Time Logs
+            </button>
+            <button
+              onClick={() => setActiveTab('rejected')}
+              className={cn(
+                'px-3 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5',
+                activeTab === 'rejected' ? 'bg-rose-600 text-white shadow-2xs' : 'text-rose-700 hover:text-rose-900'
+              )}
+            >
+              <span>Rejected Queue</span>
+              {rejectedLogs.length > 0 && (
+                <span className={cn(
+                  'text-[10px] font-bold px-1.5 py-0.2 rounded-full',
+                  activeTab === 'rejected' ? 'bg-white text-rose-700' : 'bg-rose-200 text-rose-900'
+                )}>
+                  {rejectedLogs.length}
+                </span>
+              )}
+            </button>
+          </div>
+
           {/* Type Filter */}
           <select
             value={typeFilter}
@@ -178,16 +310,18 @@ export const TimeTracking: React.FC = () => {
           </select>
 
           {/* Approval Filter */}
-          <select
-            value={approvalFilter}
-            onChange={(e) => setApprovalFilter(e.target.value)}
-            className="text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
-          >
-            <option value="all">All Approval States</option>
-            <option value="approved">Approved</option>
-            <option value="pending">Pending</option>
-            <option value="rejected">Rejected</option>
-          </select>
+          {activeTab === 'all' && (
+            <select
+              value={approvalFilter}
+              onChange={(e) => setApprovalFilter(e.target.value)}
+              className="text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
+            >
+              <option value="all">All Approval States</option>
+              <option value="approved">Approved</option>
+              <option value="pending">Pending</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          )}
 
           {/* Attribution Filter */}
           <select
@@ -205,7 +339,7 @@ export const TimeTracking: React.FC = () => {
         <Button
           size="sm"
           icon={<Plus className="w-3.5 h-3.5" />}
-          onClick={() => setIsTimeModalOpen(true)}
+          onClick={handleOpenLogModal}
         >
           Log Work Hours
         </Button>
@@ -223,12 +357,13 @@ export const TimeTracking: React.FC = () => {
                 <th className="px-4 py-3.5">Logged Hours</th>
                 <th className="px-4 py-3.5">Attribution Policy</th>
                 <th className="px-4 py-3.5">Approval Status</th>
+                <th className="px-4 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-5 py-8 text-center text-slate-400">
                     No time logs match your filter criteria.
                   </td>
                 </tr>
@@ -239,13 +374,15 @@ export const TimeTracking: React.FC = () => {
                   const module = modules.find(m => m.id === log.module_id);
                   const bug = bugs.find(b => b.id === log.bug_id);
                   const isCorrective = log.log_type === 'corrective_maintenance';
+                  const isRejected = log.approval_status === 'rejected';
 
                   return (
                     <tr
                       key={log.id}
                       className={cn(
                         'hover:bg-slate-50/70 transition-colors',
-                        isCorrective && log.attribution_status === 'attributable' && 'bg-rose-50/15'
+                        isCorrective && log.attribution_status === 'attributable' && 'bg-rose-50/15',
+                        isRejected && 'bg-rose-50/30'
                       )}
                     >
                       {/* Date & User */}
@@ -273,14 +410,21 @@ export const TimeTracking: React.FC = () => {
 
                         {bug && (
                           <div className="mt-1.5 text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            <span>Linked Defect: {bug.id} - {bug.title}</span>
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span className="truncate">Linked Defect: {bug.id} - {bug.title}</span>
                           </div>
                         )}
 
                         <p className="text-[11px] text-slate-500 mt-1 line-clamp-1 italic">
                           &quot;{log.description}&quot;
                         </p>
+
+                        {/* If rejected, show rejection reason */}
+                        {isRejected && log.rejection_reason && (
+                          <div className="mt-1.5 p-1.5 bg-rose-100/70 border border-rose-200 rounded text-[10px] text-rose-900 font-medium">
+                            <strong>Rejection Reason:</strong> {log.rejection_reason}
+                          </div>
+                        )}
                       </td>
 
                       {/* Task & Module */}
@@ -324,6 +468,20 @@ export const TimeTracking: React.FC = () => {
                           </span>
                         )}
                       </td>
+
+                      {/* Actions */}
+                      <td className="px-4 py-4 whitespace-nowrap text-right">
+                        {isRejected && (
+                          <button
+                            onClick={() => handleOpenResubmit(log)}
+                            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors flex items-center gap-1 ml-auto"
+                            title="Resubmit corrected log"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            Resubmit
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
@@ -338,9 +496,16 @@ export const TimeTracking: React.FC = () => {
         isOpen={isTimeModalOpen}
         onClose={() => setIsTimeModalOpen(false)}
         title="Log Engineering Work Hours"
-        description="Maintain strict separation between new feature work and defect rework."
+        description="Maintain strict separation between new feature work and corrective rework."
       >
         <form onSubmit={handleLogTime} className="space-y-4">
+          {timeError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{timeError}</span>
+            </div>
+          )}
+
           {/* Work Type Switcher Tabs */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-2">Work Category *</label>
@@ -388,7 +553,7 @@ export const TimeTracking: React.FC = () => {
           {/* Conditional Notice if Corrective */}
           {logType === 'corrective_maintenance' && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs">
-              <span className="font-bold block">Important Quality Separation Rule:</span>
+              <span className="font-bold block">Defect Rework Governance Policy:</span>
               <p className="mt-0.5 leading-relaxed">
                 Corrective maintenance hours must be tied to a documented bug. Approved hours attributable to original delivery defects enter the next-month payroll rework review under company policy.
               </p>
@@ -431,12 +596,12 @@ export const TimeTracking: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Hours Worked *</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Hours Worked * (Max 16h/day)</label>
               <input
                 type="number"
                 step="0.5"
                 min="0.5"
-                max="24"
+                max="16"
                 required
                 value={hours}
                 onChange={(e) => setHours(Number(e.target.value))}
@@ -445,10 +610,11 @@ export const TimeTracking: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Date *</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Date * (No future dates)</label>
               <input
                 type="date"
                 required
+                max={todayStr}
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -474,6 +640,65 @@ export const TimeTracking: React.FC = () => {
             </Button>
             <Button type="submit" size="sm">
               Submit Time Log
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Resubmit Rejected Log */}
+      <Modal
+        isOpen={Boolean(resubmitTarget)}
+        onClose={() => setResubmitTarget(null)}
+        title="Resubmit Corrected Time Log"
+        description={`Log ID: ${resubmitTarget?.id} (Previously Rejected)`}
+      >
+        <form onSubmit={handleConfirmResubmit} className="space-y-4 text-xs">
+          {resubmitError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{resubmitError}</span>
+            </div>
+          )}
+
+          {resubmitTarget?.rejection_reason && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-900">
+              <span className="font-bold block">Reviewer&apos;s Rejection Reason:</span>
+              <p className="mt-0.5">{resubmitTarget.rejection_reason}</p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Adjusted Hours * (Max 16h)</label>
+            <input
+              type="number"
+              step="0.5"
+              min="0.5"
+              max="16"
+              required
+              value={resubmitHours}
+              onChange={(e) => setResubmitHours(Number(e.target.value))}
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Clarified Work Description *</label>
+            <textarea
+              rows={3}
+              required
+              value={resubmitDescription}
+              onChange={(e) => setResubmitDescription(e.target.value)}
+              placeholder="Address the reviewer's concerns and explain specific fixes applied..."
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setResubmitTarget(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm">
+              Confirm Resubmission
             </Button>
           </div>
         </form>

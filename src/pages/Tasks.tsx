@@ -12,13 +12,20 @@ import {
   Bug, 
   User, 
   Calendar,
-  ExternalLink
+  ExternalLink,
+  Play,
+  Wrench,
+  ShieldCheck,
+  History,
+  Check,
+  X,
+  FileText
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
-import { formatHours, formatDate, cn } from '../lib/utils';
-import { Task, TaskPriority, TaskStatus } from '../types';
+import { formatHours, formatDate, formatDateTime, cn } from '../lib/utils';
+import { Task, TaskPriority, TaskStatus, TaskStateHistory } from '../types';
 import { Link } from 'react-router-dom';
 
 export const Tasks: React.FC = () => {
@@ -30,19 +37,27 @@ export const Tasks: React.FC = () => {
     updateTask, 
     completeTask, 
     reopenTask, 
+    startCorrectiveWork,
+    closeTask,
+    taskStateHistory,
     searchQuery 
   } = useApp();
-  const { currentUser, users, canCreateTask } = useAuth();
+  const { currentUser, users, canCreateTask, isManager, isLead } = useAuth();
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [assignedFilter, setAssignedFilter] = useState<string>('all');
 
-  // Modals
+  // Modals & Drawers
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [reopenTarget, setReopenTarget] = useState<Task | null>(null);
   const [reopenReason, setReopenReason] = useState('');
+  
+  const [verifyTarget, setVerifyTarget] = useState<Task | null>(null);
+  const [verifyNotes, setVerifyNotes] = useState('');
+
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
 
   // Form State
   const [newTask, setNewTask] = useState({
@@ -53,14 +68,15 @@ export const Tasks: React.FC = () => {
     assigned_to: users.find(u => u.role === 'employee')?.id || users[0].id,
     created_by: currentUser.id,
     priority: 'medium' as TaskPriority,
-    status: 'in_progress' as TaskStatus,
+    status: 'assigned' as TaskStatus,
     estimated_hours: 16,
+    committed_due_date: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
   });
 
-  const handleCreateTask = (e: React.FormEvent) => {
+  const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTask.title || !newTask.module_id) return;
-    addTask(newTask);
+    await addTask(newTask);
     setIsTaskModalOpen(false);
     setNewTask({
       title: '',
@@ -70,16 +86,36 @@ export const Tasks: React.FC = () => {
       assigned_to: users.find(u => u.role === 'employee')?.id || users[0].id,
       created_by: currentUser.id,
       priority: 'medium',
-      status: 'in_progress',
+      status: 'assigned',
       estimated_hours: 16,
+      committed_due_date: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
     });
   };
 
-  const handleConfirmReopen = () => {
+  const handleStartTask = async (taskId: string) => {
+    await updateTask(taskId, { status: 'in_progress' });
+  };
+
+  const handleCompleteTask = async (taskId: string) => {
+    await completeTask(taskId, currentUser.id);
+  };
+
+  const handleStartFix = async (taskId: string) => {
+    await startCorrectiveWork(taskId, currentUser.id);
+  };
+
+  const handleConfirmReopen = async () => {
     if (!reopenTarget) return;
-    reopenTask(reopenTarget.id, reopenReason);
+    await reopenTask(reopenTarget.id, reopenReason, currentUser.id);
     setReopenTarget(null);
     setReopenReason('');
+  };
+
+  const handleConfirmClose = async () => {
+    if (!verifyTarget) return;
+    await closeTask(verifyTarget.id, verifyNotes || 'Fix verified and accepted.', currentUser.id);
+    setVerifyTarget(null);
+    setVerifyNotes('');
   };
 
   // Filter tasks
@@ -109,18 +145,29 @@ export const Tasks: React.FC = () => {
 
   const getStatusBadge = (status: TaskStatus) => {
     switch (status) {
-      case 'completed':
-        return <Badge variant="success" dot>Delivered & Completed</Badge>;
-      case 'reopened':
-        return <Badge variant="danger" dot>Reopened (Corrective Rework)</Badge>;
+      case 'assigned':
+        return <Badge variant="default" dot>Assigned</Badge>;
       case 'in_progress':
         return <Badge variant="info" dot>In Progress</Badge>;
       case 'in_review':
         return <Badge variant="purple" dot>In Review</Badge>;
+      case 'completed':
+        return <Badge variant="success" dot>Delivered & Completed</Badge>;
+      case 'reopened':
+        return <Badge variant="danger" dot>Reopened (Rework)</Badge>;
+      case 'under_fix':
+        return <Badge variant="warning" dot>Under Fix (Corrective)</Badge>;
+      case 'closed':
+        return <Badge variant="success" dot>Verified & Closed</Badge>;
       case 'backlog':
         return <Badge variant="default">Backlog</Badge>;
     }
   };
+
+  // State history for detailed modal
+  const activeTaskHistory = detailTask 
+    ? (taskStateHistory || []).filter(h => h.task_id === detailTask.id).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    : [];
 
   return (
     <div className="space-y-6">
@@ -134,11 +181,12 @@ export const Tasks: React.FC = () => {
             className="text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
           >
             <option value="all">All Task Statuses</option>
+            <option value="assigned">Assigned</option>
             <option value="in_progress">In Progress</option>
-            <option value="in_review">In Review</option>
-            <option value="completed">Completed & Delivered</option>
-            <option value="reopened">Reopened for Rework</option>
-            <option value="backlog">Backlog</option>
+            <option value="completed">Delivered & Completed</option>
+            <option value="reopened">Reopened</option>
+            <option value="under_fix">Under Fix</option>
+            <option value="closed">Verified & Closed</option>
           </select>
 
           {/* Priority Filter */}
@@ -215,10 +263,10 @@ export const Tasks: React.FC = () => {
               <tr>
                 <th className="px-5 py-3.5">Task & Module</th>
                 <th className="px-4 py-3.5">Priority</th>
-                <th className="px-4 py-3.5">Assignee</th>
+                <th className="px-4 py-3.5">Assignee & Original Dev</th>
                 <th className="px-4 py-3.5">Hours (Regular / Rework)</th>
-                <th className="px-4 py-3.5">Status</th>
-                <th className="px-4 py-3.5 text-right">Actions</th>
+                <th className="px-4 py-3.5">Status & Delivery</th>
+                <th className="px-4 py-3.5 text-right">Lifecycle Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -233,21 +281,28 @@ export const Tasks: React.FC = () => {
                   const module = modules.find((m) => m.id === task.module_id);
                   const project = projects.find((p) => p.id === task.project_id);
                   const assignee = users.find((u) => u.id === task.assigned_to);
+                  const originalDev = users.find((u) => u.id === task.original_delivery_employee_id);
                   const isCompleted = task.status === 'completed';
                   const isReopened = task.status === 'reopened';
+                  const isUnderFix = task.status === 'under_fix';
+                  const isClosed = task.status === 'closed';
 
                   return (
                     <tr 
                       key={task.id} 
                       className={cn(
                         'hover:bg-slate-50/70 transition-colors',
-                        isReopened && 'bg-rose-50/20'
+                        (isReopened || isUnderFix) && 'bg-rose-50/20'
                       )}
                     >
                       {/* Title & Module */}
                       <td className="px-5 py-4 max-w-sm">
-                        <div className="font-semibold text-slate-900 text-xs">
-                          {task.title}
+                        <div 
+                          onClick={() => setDetailTask(task)}
+                          className="font-semibold text-slate-900 text-xs hover:text-blue-600 cursor-pointer flex items-center gap-1.5"
+                        >
+                          <span>{task.title}</span>
+                          <History className="w-3.5 h-3.5 text-slate-400 hover:text-blue-500 shrink-0" />
                         </div>
                         <p className="text-slate-500 text-[11px] mt-0.5 line-clamp-1">
                           {task.description}
@@ -266,7 +321,7 @@ export const Tasks: React.FC = () => {
                         {getPriorityBadge(task.priority)}
                       </td>
 
-                      {/* Assignee */}
+                      {/* Assignee & Original Dev */}
                       <td className="px-4 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <img
@@ -274,9 +329,16 @@ export const Tasks: React.FC = () => {
                             alt={assignee?.full_name}
                             className="w-6 h-6 rounded-full object-cover ring-1 ring-slate-200"
                           />
-                          <span className="font-medium text-slate-800">
-                            {assignee?.full_name}
-                          </span>
+                          <div>
+                            <span className="font-medium text-slate-800 block">
+                              {assignee?.full_name}
+                            </span>
+                            {originalDev && originalDev.id !== assignee?.id && (
+                              <span className="text-[10px] text-amber-700 font-medium block">
+                                Orig: {originalDev.full_name}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
 
@@ -302,12 +364,31 @@ export const Tasks: React.FC = () => {
                         </span>
                       </td>
 
-                      {/* Status */}
+                      {/* Status & Delivery Info */}
                       <td className="px-4 py-4 whitespace-nowrap">
-                        {getStatusBadge(task.status)}
+                        <div className="flex items-center gap-1.5">
+                          {getStatusBadge(task.status)}
+                          {task.is_delivered_on_time !== undefined && (
+                            <span 
+                              className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                task.is_delivered_on_time 
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  : "bg-amber-50 text-amber-700 border-amber-200"
+                              )}
+                            >
+                              {task.is_delivered_on_time ? 'On-Time' : 'Late'}
+                            </span>
+                          )}
+                        </div>
                         {task.delivered_at && (
-                          <span className="text-[10px] text-emerald-700 block mt-0.5">
+                          <span className="text-[10px] text-slate-500 block mt-0.5">
                             Delivered: {formatDate(task.delivered_at)}
+                          </span>
+                        )}
+                        {task.closed_at && (
+                          <span className="text-[10px] text-emerald-700 block mt-0.5">
+                            Closed: {formatDate(task.closed_at)}
                           </span>
                         )}
                       </td>
@@ -324,10 +405,22 @@ export const Tasks: React.FC = () => {
                             <Clock className="w-4 h-4" />
                           </Link>
 
-                          {/* Complete & Deliver button */}
-                          {!isCompleted && (
+                          {/* Action 1: Assigned -> Start */}
+                          {task.status === 'assigned' && (
                             <button
-                              onClick={() => completeTask(task.id)}
+                              onClick={() => handleStartTask(task.id)}
+                              className="px-2.5 py-1 text-xs font-medium rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors flex items-center gap-1"
+                              title="Start working on this task"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              Start
+                            </button>
+                          )}
+
+                          {/* Action 2: In Progress -> Complete & Deliver */}
+                          {task.status === 'in_progress' && (
+                            <button
+                              onClick={() => handleCompleteTask(task.id)}
                               className="px-2.5 py-1 text-xs font-medium rounded-md bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors flex items-center gap-1"
                               title="Deliver and complete task"
                             >
@@ -336,8 +429,35 @@ export const Tasks: React.FC = () => {
                             </button>
                           )}
 
-                          {/* Reopen button */}
-                          {isCompleted && (
+                          {/* Action 3: Reopened -> Start Fix */}
+                          {task.status === 'reopened' && (
+                            <button
+                              onClick={() => handleStartFix(task.id)}
+                              className="px-2.5 py-1 text-xs font-medium rounded-md bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition-colors flex items-center gap-1"
+                              title="Start corrective maintenance fix"
+                            >
+                              <Wrench className="w-3.5 h-3.5" />
+                              Start Fix
+                            </button>
+                          )}
+
+                          {/* Action 4: Under Fix -> Verify & Close */}
+                          {task.status === 'under_fix' && (
+                            <button
+                              onClick={() => {
+                                setVerifyTarget(task);
+                                setVerifyNotes('');
+                              }}
+                              className="px-2.5 py-1 text-xs font-medium rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors flex items-center gap-1"
+                              title="Review and verify fix before closure"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              Verify & Close
+                            </button>
+                          )}
+
+                          {/* Action 5: Completed or Closed -> Reopen */}
+                          {(isCompleted || isClosed) && (
                             <button
                               onClick={() => setReopenTarget(task)}
                               className="px-2.5 py-1 text-xs font-medium rounded-md bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors flex items-center gap-1"
@@ -363,7 +483,7 @@ export const Tasks: React.FC = () => {
         isOpen={isTaskModalOpen}
         onClose={() => setIsTaskModalOpen(false)}
         title="Create Engineering Task"
-        description="Assign a feature or technical deliverable under an active module."
+        description="Assign a deliverable with committed deadlines and lifecycle tracking."
       >
         <form onSubmit={handleCreateTask} className="space-y-4">
           <div>
@@ -462,6 +582,17 @@ export const Tasks: React.FC = () => {
           </div>
 
           <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Committed Due Date *</label>
+            <input
+              type="date"
+              required
+              value={newTask.committed_due_date}
+              onChange={(e) => setNewTask({ ...newTask, committed_due_date: e.target.value })}
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
             <textarea
               rows={3}
@@ -488,13 +619,13 @@ export const Tasks: React.FC = () => {
         isOpen={Boolean(reopenTarget)}
         onClose={() => setReopenTarget(null)}
         title="Reopen Task for Corrective Rework"
-        description="Mark this delivered task as reopened to allocate corrective maintenance hours."
+        description="Mark this delivered task as reopened. Corrective hours logged will be linked to original delivery."
       >
         <div className="space-y-4">
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs">
-            <p className="font-semibold text-amber-950">Task Reopening Notification</p>
+            <p className="font-semibold text-amber-950">Original Delivery Snapshot Preserved</p>
             <p className="mt-0.5">
-              Assignee will be notified. Any corrective hours logged on this reopened task will be reviewed for defect attribution.
+              The original developer snapshot (<strong>{users.find(u => u.id === reopenTarget?.original_delivery_employee_id || u.id === reopenTarget?.assigned_to)?.full_name}</strong>) and on-time status are permanently preserved.
             </p>
           </div>
 
@@ -502,9 +633,10 @@ export const Tasks: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 mb-1">Reason for Reopening *</label>
             <textarea
               rows={3}
+              required
               value={reopenReason}
               onChange={(e) => setReopenReason(e.target.value)}
-              placeholder="State the defect or bug ID triggering this rework..."
+              placeholder="State the defect, client complaint, or bug reference triggering this rework..."
               className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -513,8 +645,163 @@ export const Tasks: React.FC = () => {
             <Button variant="outline" size="sm" onClick={() => setReopenTarget(null)}>
               Cancel
             </Button>
-            <Button variant="danger" size="sm" onClick={handleConfirmReopen}>
+            <Button variant="danger" size="sm" onClick={handleConfirmReopen} disabled={!reopenReason.trim()}>
               Confirm Reopen
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Verify & Close Task */}
+      <Modal
+        isOpen={Boolean(verifyTarget)}
+        onClose={() => setVerifyTarget(null)}
+        title="Verify and Close Corrective Task"
+        description="Review corrective maintenance fix and authorize closure of task."
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-900 text-xs">
+            <p className="font-semibold text-blue-950">Quality Sign-Off Required</p>
+            <p className="mt-0.5">
+              Authorizing closure marks the defect resolved and freezes corrective time logging.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Verification Sign-Off Notes *</label>
+            <textarea
+              rows={3}
+              required
+              value={verifyNotes}
+              onChange={(e) => setVerifyNotes(e.target.value)}
+              placeholder="Confirm regression testing passed, CI pipeline green, and acceptance criteria satisfied..."
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setVerifyTarget(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleConfirmClose} disabled={!verifyNotes.trim()}>
+              Verify & Close Task
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Task Detail & State History Timeline Drawer */}
+      <Modal
+        isOpen={Boolean(detailTask)}
+        onClose={() => setDetailTask(null)}
+        title={detailTask?.title || 'Task Details & Lifecycle History'}
+        description={`Task ID: ${detailTask?.id}`}
+      >
+        <div className="space-y-4 text-xs">
+          {/* Metadata Grid */}
+          <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <div>
+              <span className="text-slate-400 font-medium block">Current Status</span>
+              <div className="mt-1">{detailTask && getStatusBadge(detailTask.status)}</div>
+            </div>
+            <div>
+              <span className="text-slate-400 font-medium block">Delivery Timeliness</span>
+              <span className="font-bold text-slate-800 block mt-1">
+                {detailTask?.is_delivered_on_time === true && <span className="text-emerald-600 font-semibold">Delivered On-Time</span>}
+                {detailTask?.is_delivered_on_time === false && <span className="text-amber-600 font-semibold">Delivered Late</span>}
+                {detailTask?.is_delivered_on_time === undefined && <span className="text-slate-400">Not Delivered Yet</span>}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 font-medium block">Original Delivery Engineer</span>
+              <span className="font-semibold text-slate-800 block mt-0.5">
+                {users.find(u => u.id === (detailTask?.original_delivery_employee_id || detailTask?.assigned_to))?.full_name || 'N/A'}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 font-medium block">Committed Deadline</span>
+              <span className="font-mono text-slate-800 block mt-0.5">
+                {detailTask?.committed_due_date ? formatDate(detailTask.committed_due_date) : 'N/A'}
+              </span>
+            </div>
+            {detailTask?.delivered_at && (
+              <div>
+                <span className="text-slate-400 font-medium block">Delivered At</span>
+                <span className="text-slate-800 block mt-0.5">{formatDateTime(detailTask.delivered_at)}</span>
+              </div>
+            )}
+            {detailTask?.closed_at && (
+              <div>
+                <span className="text-slate-400 font-medium block">Closed At</span>
+                <span className="text-slate-800 block mt-0.5">{formatDateTime(detailTask.closed_at)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Description */}
+          <div>
+            <span className="font-semibold text-slate-700 block mb-1">Task Scope & Acceptance Criteria</span>
+            <p className="p-3 bg-white border border-slate-200 rounded-lg text-slate-700 leading-relaxed">
+              {detailTask?.description || 'No description provided.'}
+            </p>
+          </div>
+
+          {/* Verification Notes */}
+          {detailTask?.verification_notes && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900">
+              <span className="font-bold block">Verification Sign-Off:</span>
+              <p className="mt-0.5">{detailTask.verification_notes}</p>
+            </div>
+          )}
+
+          {/* State History Audit Trail */}
+          <div>
+            <span className="font-semibold text-slate-700 block mb-2 flex items-center gap-1.5">
+              <History className="w-4 h-4 text-slate-500" />
+              Immutable Lifecycle State History ({activeTaskHistory.length})
+            </span>
+            {activeTaskHistory.length === 0 ? (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 italic text-center">
+                No recorded state changes yet.
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                {activeTaskHistory.map((hist) => {
+                  const actor = users.find(u => u.id === hist.actor_id);
+                  return (
+                    <div key={hist.id} className="p-2.5 hover:bg-slate-50 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[10px] uppercase font-bold text-slate-500 bg-slate-100 px-1 py-0.2 rounded">
+                            {hist.previous_status || 'INIT'}
+                          </span>
+                          <span className="text-slate-400">→</span>
+                          <span className="font-mono text-[10px] uppercase font-bold text-blue-700 bg-blue-50 px-1 py-0.2 rounded">
+                            {hist.new_status}
+                          </span>
+                        </div>
+                        {hist.reason && (
+                          <p className="text-[11px] text-slate-600 mt-1 italic">
+                            &quot;{hist.reason}&quot;
+                          </p>
+                        )}
+                        <span className="text-[10px] text-slate-400 block mt-1">
+                          Actor: {actor?.full_name || hist.actor_id}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                        {formatDateTime(hist.created_at)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end">
+            <Button variant="outline" size="sm" onClick={() => setDetailTask(null)}>
+              Close
             </Button>
           </div>
         </div>

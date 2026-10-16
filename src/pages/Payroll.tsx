@@ -30,6 +30,7 @@ import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { formatCurrency, formatHours, formatDate, cn } from '../lib/utils';
 import { PayrollRecord, User, AdjustmentType, PayrollAdjustment } from '../types';
+import { exportPayrollToCSV } from '../lib/csvExport';
 
 export const Payroll: React.FC = () => {
   const { 
@@ -220,8 +221,18 @@ export const Payroll: React.FC = () => {
           </div>
         </div>
 
-        {canManagePayroll && (
-          <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            size="sm"
+            variant="outline"
+            icon={<Download className="w-3.5 h-3.5" />}
+            onClick={() => exportPayrollToCSV(filteredRecords, users, selectedMonth)}
+            className="bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-2xs"
+          >
+            Export CSV
+          </Button>
+
+          {canManagePayroll && (
             <Button
               size="sm"
               variant="outline"
@@ -231,8 +242,8 @@ export const Payroll: React.FC = () => {
             >
               Recalculate {selectedMonth}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {calcNotice && (

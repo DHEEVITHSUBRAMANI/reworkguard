@@ -281,3 +281,58 @@ export function exportQualityMetricsToCSV(
   const csvContent = [headers.map(escapeCSVCell).join(','), ...rows].join('\r\n');
   triggerCSVDownload(filename, csvContent);
 }
+
+/**
+ * Export Defect Reports to CSV
+ */
+export function exportBugsToCSV(
+  bugs: BugReport[],
+  tasks: Task[],
+  modules: Module[],
+  users: User[],
+  filename: string = `reworkguard-defects-${new Date().toISOString().split('T')[0]}`
+): void {
+  const headers = [
+    'Bug ID',
+    'Title',
+    'Severity',
+    'Status',
+    'Attribution Classification',
+    'Linked Task',
+    'Module',
+    'Original Developer',
+    'Assigned To',
+    'Reporter',
+    'Date Found',
+    'Fix Verification',
+    'Justification Notes'
+  ];
+
+  const rows = bugs.map(b => {
+    const task = tasks.find(t => t.id === (b.original_task_id || b.task_id));
+    const mod = modules.find(m => m.id === b.module_id);
+    const origDev = users.find(u => u.id === b.original_developer_id);
+    const assigned = users.find(u => u.id === b.assigned_to);
+    const reporter = users.find(u => u.id === b.reporter_id);
+
+    return [
+      b.id,
+      b.title,
+      b.severity,
+      b.status,
+      b.defect_classification || b.attribution_classification || 'pending_investigation',
+      task?.title || b.original_task_id || b.task_id || '',
+      mod?.name || b.module_id || '',
+      origDev?.full_name || b.original_developer_id || '',
+      assigned?.full_name || b.assigned_to || '',
+      reporter?.full_name || b.reporter_id || '',
+      b.date_found || '',
+      b.fix_verification_status || 'pending',
+      b.classification_notes || b.classification_justification || ''
+    ].map(escapeCSVCell).join(',');
+  });
+
+  const csvContent = [headers.map(escapeCSVCell).join(','), ...rows].join('\r\n');
+  triggerCSVDownload(filename, csvContent);
+}
+

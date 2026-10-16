@@ -18,13 +18,15 @@ import {
   Check,
   X,
   Layers,
-  Wrench
+  Wrench,
+  Download
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { formatDateTime, formatDate, formatHours, cn } from '../lib/utils';
 import { BugReport, BugSeverity, BugStatus, DefectClassification, Task } from '../types';
+import { exportBugsToCSV } from '../lib/csvExport';
 
 export const Bugs: React.FC = () => {
   const { 
@@ -312,13 +314,24 @@ export const Bugs: React.FC = () => {
           </select>
         </div>
 
-        <Button
-          size="sm"
-          icon={<Plus className="w-3.5 h-3.5" />}
-          onClick={() => setIsReportModalOpen(true)}
-        >
-          Report Defect
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Download className="w-3.5 h-3.5" />}
+            onClick={() => exportBugsToCSV(filteredBugs, tasks, modules, users)}
+          >
+            Export CSV
+          </Button>
+
+          <Button
+            size="sm"
+            icon={<Plus className="w-3.5 h-3.5" />}
+            onClick={() => setIsReportModalOpen(true)}
+          >
+            Report Defect
+          </Button>
+        </div>
       </div>
 
       {/* Bugs Table */}

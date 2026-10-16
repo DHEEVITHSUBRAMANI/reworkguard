@@ -14,13 +14,15 @@ import {
   HelpCircle,
   CheckCheck,
   ShieldAlert,
-  UserX
+  UserX,
+  Download
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { formatHours, formatDate, cn } from '../lib/utils';
 import { TimeLog, AttributionStatus } from '../types';
+import { exportTimeLogsToCSV } from '../lib/csvExport';
 
 export const Approvals: React.FC = () => {
   const { timeLogs, tasks, modules, projects, bugs, reviewTimeLog, searchQuery } = useApp();
@@ -188,16 +190,27 @@ export const Approvals: React.FC = () => {
           </button>
         </div>
 
-        {canApproveTime && pendingLogs.length > 0 && filterType === 'pending' && (
+        <div className="flex items-center gap-2">
           <Button
             size="sm"
             variant="outline"
-            icon={<CheckCheck className="w-3.5 h-3.5" />}
-            onClick={handleBatchApprovePending}
+            icon={<Download className="w-3.5 h-3.5" />}
+            onClick={() => exportTimeLogsToCSV(displayedLogs, users, bugs, tasks)}
           >
-            Approve All Eligible Pending
+            Export CSV
           </Button>
-        )}
+
+          {canApproveTime && pendingLogs.length > 0 && filterType === 'pending' && (
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<CheckCheck className="w-3.5 h-3.5" />}
+              onClick={handleBatchApprovePending}
+            >
+              Approve All Eligible Pending
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Approvals Table */}

@@ -192,6 +192,7 @@ export interface TimeLog {
   approval_status: ApprovalStatus;
   approved_by?: string;
   reviewer_id?: string;
+  reviewer_name?: string;
   approved_at?: string;
   review_timestamp?: string;
   rejection_reason?: string;

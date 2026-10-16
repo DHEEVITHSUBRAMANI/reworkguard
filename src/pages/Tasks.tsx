@@ -19,7 +19,8 @@ import {
   History,
   Check,
   X,
-  FileText
+  FileText,
+  Download
 } from 'lucide-react';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -27,6 +28,7 @@ import { Modal } from '../components/common/Modal';
 import { formatHours, formatDate, formatDateTime, cn } from '../lib/utils';
 import { Task, TaskPriority, TaskStatus, TaskStateHistory } from '../types';
 import { Link } from 'react-router-dom';
+import { exportTasksToCSV } from '../lib/csvExport';
 
 export const Tasks: React.FC = () => {
   const { 
@@ -244,15 +246,26 @@ export const Tasks: React.FC = () => {
           </button>
         </div>
 
-        {canCreateTask && (
+        <div className="flex items-center gap-2">
           <Button
+            variant="outline"
             size="sm"
-            icon={<Plus className="w-3.5 h-3.5" />}
-            onClick={() => setIsTaskModalOpen(true)}
+            icon={<Download className="w-3.5 h-3.5" />}
+            onClick={() => exportTasksToCSV(filteredTasks, users, modules)}
           >
-            New Task
+            Export CSV
           </Button>
-        )}
+
+          {canCreateTask && (
+            <Button
+              size="sm"
+              icon={<Plus className="w-3.5 h-3.5" />}
+              onClick={() => setIsTaskModalOpen(true)}
+            >
+              New Task
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Tasks Table */}

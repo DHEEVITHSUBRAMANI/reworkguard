@@ -166,7 +166,7 @@ export const Tasks: React.FC = () => {
 
   // State history for detailed modal
   const activeTaskHistory = detailTask 
-    ? (taskStateHistory || []).filter(h => h.task_id === detailTask.id).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    ? (taskStateHistory || []).filter(h => h.task_id === detailTask.id).sort((a, b) => new Date(b.created_at || b.timestamp).getTime() - new Date(a.created_at || a.timestamp).getTime())
     : [];
 
   return (
@@ -790,7 +790,7 @@ export const Tasks: React.FC = () => {
                         </span>
                       </div>
                       <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                        {formatDateTime(hist.created_at)}
+                        {formatDateTime(hist.created_at || hist.timestamp)}
                       </span>
                     </div>
                   );

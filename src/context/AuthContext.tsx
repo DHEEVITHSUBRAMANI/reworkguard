@@ -8,6 +8,7 @@ interface AuthContextType {
   switchUser: (userId: string) => void;
   isEmployee: boolean;
   isTeamLead: boolean;
+  isLead: boolean;
   isManager: boolean;
   isFinanceAdmin: boolean;
   canApproveTime: boolean;
@@ -53,6 +54,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         switchUser,
         isEmployee,
         isTeamLead,
+        isLead: isTeamLead,
         isManager,
         isFinanceAdmin,
         canApproveTime,

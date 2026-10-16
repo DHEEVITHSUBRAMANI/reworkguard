@@ -50,10 +50,10 @@ interface AppContextType {
   addTask: (data: Omit<Task, 'id' | 'created_at' | 'corrective_hours' | 'actual_regular_hours'>) => void;
   updateTask: (id: string, data: Partial<Task>) => void;
   updateTaskStatus: (taskId: string, newStatus: TaskStatus, reason: string) => Promise<{ success: boolean; error?: string }>;
-  completeTask: (id: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
-  startCorrectiveWork: (id: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
-  reopenTask: (id: string, reason?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
-  closeTask: (id: string, reason?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
+  completeTask: (id: string, actorId?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
+  startCorrectiveWork: (id: string, actorId?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
+  reopenTask: (id: string, reason?: string, actorId?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
+  closeTask: (id: string, reason?: string, actorId?: string) => Promise<{ success: boolean; task?: Task; error?: string }>;
   
   addBugReport: (data: Omit<BugReport, 'id' | 'created_at'>) => Promise<{ success: boolean; bug?: BugReport; error?: string }>;
   classifyDefect: (
@@ -237,8 +237,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Tasks Lifecycle
-  const completeTask = async (id: string) => {
-    const res = await tasksApi.complete(id, currentUser.id, currentUser.full_name);
+  const completeTask = async (id: string, actorId?: string) => {
+    const actId = actorId || currentUser.id;
+    const actUser = users.find(u => u.id === actId) || currentUser;
+    const res = await tasksApi.complete(id, actId, actUser.full_name);
     if (!res.success) return res;
     setTasks(StorageService.getTasks());
     setTaskStateHistory(StorageService.getTaskStateHistory());
@@ -287,8 +289,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
-  const startCorrectiveWork = async (id: string) => {
-    const res = await tasksApi.startFix(id, currentUser.id, currentUser.full_name);
+  const startCorrectiveWork = async (id: string, actorId?: string) => {
+    const actId = actorId || currentUser.id;
+    const actUser = users.find(u => u.id === actId) || currentUser;
+    const res = await tasksApi.startFix(id, actId, actUser.full_name);
     if (!res.success) return res;
     setTasks(StorageService.getTasks());
     setTaskStateHistory(StorageService.getTaskStateHistory());
@@ -296,8 +300,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res;
   };
 
-  const reopenTask = async (id: string, reason?: string) => {
-    const res = await tasksApi.reopen(id, reason || 'Post-delivery defect detected', currentUser.id, currentUser.full_name);
+  const reopenTask = async (id: string, reason?: string, actorId?: string) => {
+    const actId = actorId || currentUser.id;
+    const actUser = users.find(u => u.id === actId) || currentUser;
+    const res = await tasksApi.reopen(id, reason || 'Post-delivery defect detected', actId, actUser.full_name);
     if (!res.success) return res;
     setTasks(StorageService.getTasks());
     setTaskStateHistory(StorageService.getTaskStateHistory());
@@ -308,8 +314,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res;
   };
 
-  const closeTask = async (id: string, reason?: string) => {
-    const res = await tasksApi.close(id, reason || 'Verified and approved for release', currentUser.id, currentUser.full_name);
+  const closeTask = async (id: string, reason?: string, actorId?: string) => {
+    const actId = actorId || currentUser.id;
+    const actUser = users.find(u => u.id === actId) || currentUser;
+    const res = await tasksApi.close(id, reason || 'Verified and approved for release', actId, actUser.full_name);
     if (!res.success) return res;
     setTasks(StorageService.getTasks());
     setTaskStateHistory(StorageService.getTaskStateHistory());

@@ -369,7 +369,9 @@ export const tasksApi = {
     const updatedTask: Task = {
       ...task,
       status: 'closed',
+      fix_verification_status: 'passed',
       closure_date: now,
+      closed_at: now,
       updated_at: now
     };
 
@@ -697,7 +699,7 @@ export const timeLogsApi = {
     // SELF-APPROVAL ENFORCEMENT: Unauthorized users cannot approve their own logs!
     const targetUserId = target.employee_id || target.user_id;
     if (status === 'approved' && targetUserId === reviewerId) {
-      return { success: false, error: 'Unauthorized: Users cannot approve their own time logs.' };
+      return { success: false, error: 'Unauthorized: Self-approval forbidden. Users cannot approve their own time logs.' };
     }
 
     const now = new Date().toISOString();

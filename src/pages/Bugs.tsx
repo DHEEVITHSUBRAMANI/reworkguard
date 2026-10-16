@@ -770,7 +770,7 @@ export const Bugs: React.FC = () => {
               <div className="max-h-32 overflow-y-auto space-y-1 text-[11px]">
                 {classifyAttributions.map((a) => (
                   <div key={a.id} className="p-2 bg-slate-50 border border-slate-200 rounded text-slate-700">
-                    <span className="font-semibold text-slate-900">{a.new_classification.replace(/_/g, ' ')}</span>
+                    <span className="font-semibold text-slate-900">{(a.classification || a.new_classification || '').replace(/_/g, ' ')}</span>
                     <span className="text-slate-400 text-[10px] ml-2">{formatDate(a.created_at)}</span>
                     <p className="text-slate-600 italic mt-0.5">{a.justification}</p>
                   </div>
@@ -964,12 +964,12 @@ export const Bugs: React.FC = () => {
             ) : (
               <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-40 overflow-y-auto">
                 {currentAttributions.map((a) => {
-                  const decider = users.find(u => u.id === a.decided_by);
+                  const decider = users.find(u => u.id === (a.reviewer_id || a.decided_by));
                   return (
                     <div key={a.id} className="p-2.5 hover:bg-slate-50">
                       <div className="flex items-center justify-between">
                         <span className="font-semibold text-slate-800">
-                          {a.new_classification.replace(/_/g, ' ')}
+                          {(a.classification || a.new_classification || '').replace(/_/g, ' ')}
                         </span>
                         <span className="text-[10px] text-slate-400 font-mono">
                           {formatDateTime(a.created_at)}
@@ -979,7 +979,7 @@ export const Bugs: React.FC = () => {
                         &quot;{a.justification}&quot;
                       </p>
                       <span className="text-[10px] text-slate-400 block mt-1">
-                        Decider: {decider?.full_name || a.decided_by}
+                        Decider: {decider?.full_name || a.reviewer_name || a.reviewer_id || a.decided_by}
                       </span>
                     </div>
                   );

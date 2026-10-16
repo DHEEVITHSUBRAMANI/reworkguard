@@ -44,25 +44,62 @@ const STORAGE_KEYS = {
   BUG_ATTRIBUTION_HISTORY: 'reworkguard_bug_attributions_v1',
 };
 
+const memoryStore: Record<string, string> = {};
+
+const storageBackend = {
+  getItem: (key: string): string | null => {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return memoryStore[key] || null;
+      }
+    }
+    return memoryStore[key] || null;
+  },
+  setItem: (key: string, value: string): void => {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(key, value);
+        return;
+      } catch {
+        memoryStore[key] = value;
+      }
+    }
+    memoryStore[key] = value;
+  },
+  removeItem: (key: string): void => {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(key);
+        return;
+      } catch {
+        delete memoryStore[key];
+      }
+    }
+    delete memoryStore[key];
+  }
+};
+
 function getFromStorage<T>(key: string, defaultValue: T): T {
   try {
-    const item = localStorage.getItem(key);
+    const item = storageBackend.getItem(key);
     if (!item) {
-      localStorage.setItem(key, JSON.stringify(defaultValue));
+      storageBackend.setItem(key, JSON.stringify(defaultValue));
       return defaultValue;
     }
     return JSON.parse(item);
   } catch (error) {
-    console.error(`Error reading ${key} from localStorage:`, error);
+    console.error(`Error reading ${key} from storage:`, error);
     return defaultValue;
   }
 }
 
 function setToStorage<T>(key: string, value: T): void {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    storageBackend.setItem(key, JSON.stringify(value));
   } catch (error) {
-    console.error(`Error writing ${key} to localStorage:`, error);
+    console.error(`Error writing ${key} to storage:`, error);
   }
 }
 
@@ -110,19 +147,19 @@ export const StorageService = {
   setBugAttributions: (records: BugAttributionRecord[]) => setToStorage(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, records),
 
   resetToSeedData: () => {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
-    localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(INITIAL_PROJECTS));
-    localStorage.setItem(STORAGE_KEYS.MODULES, JSON.stringify(INITIAL_MODULES));
-    localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(INITIAL_TASKS));
-    localStorage.setItem(STORAGE_KEYS.BUGS, JSON.stringify(INITIAL_BUGS));
-    localStorage.setItem(STORAGE_KEYS.TIME_LOGS, JSON.stringify(INITIAL_TIME_LOGS));
-    localStorage.setItem(STORAGE_KEYS.POLICY, JSON.stringify(INITIAL_POLICY));
-    localStorage.setItem(STORAGE_KEYS.PAYROLL, JSON.stringify(INITIAL_PAYROLL));
-    localStorage.setItem(STORAGE_KEYS.AUDIT, JSON.stringify(INITIAL_AUDIT_LOGS));
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(INITIAL_NOTIFICATIONS));
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, JSON.stringify('usr-fin-1'));
-    localStorage.setItem(STORAGE_KEYS.SELECTED_MONTH, JSON.stringify('2026-11'));
-    localStorage.setItem(STORAGE_KEYS.TASK_STATE_HISTORY, JSON.stringify(INITIAL_TASK_STATE_HISTORY));
-    localStorage.setItem(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, JSON.stringify(INITIAL_BUG_ATTRIBUTION_HISTORY));
+    setToStorage(STORAGE_KEYS.USERS, INITIAL_USERS);
+    setToStorage(STORAGE_KEYS.PROJECTS, INITIAL_PROJECTS);
+    setToStorage(STORAGE_KEYS.MODULES, INITIAL_MODULES);
+    setToStorage(STORAGE_KEYS.TASKS, INITIAL_TASKS);
+    setToStorage(STORAGE_KEYS.BUGS, INITIAL_BUGS);
+    setToStorage(STORAGE_KEYS.TIME_LOGS, INITIAL_TIME_LOGS);
+    setToStorage(STORAGE_KEYS.POLICY, INITIAL_POLICY);
+    setToStorage(STORAGE_KEYS.PAYROLL, INITIAL_PAYROLL);
+    setToStorage(STORAGE_KEYS.AUDIT, INITIAL_AUDIT_LOGS);
+    setToStorage(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
+    setToStorage(STORAGE_KEYS.ACTIVE_USER_ID, 'usr-fin-1');
+    setToStorage(STORAGE_KEYS.SELECTED_MONTH, '2026-11');
+    setToStorage(STORAGE_KEYS.TASK_STATE_HISTORY, INITIAL_TASK_STATE_HISTORY);
+    setToStorage(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, INITIAL_BUG_ATTRIBUTION_HISTORY);
   }
 };

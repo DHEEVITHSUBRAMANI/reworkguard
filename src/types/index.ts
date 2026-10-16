@@ -91,6 +91,7 @@ export interface Task {
   verification_notes?: string;
   delivered_at?: string;
   completed_at?: string;
+  closed_at?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -113,6 +114,7 @@ export interface TaskStateHistory {
   actor_name: string;
   reason?: string;
   timestamp: string;
+  created_at?: string;
 }
 
 export type BugSeverity = 'critical' | 'high' | 'medium' | 'low';
@@ -163,7 +165,9 @@ export interface BugAttributionRecord {
   reviewer_id: string;
   reviewer_name: string;
   classification: DefectClassification;
+  new_classification?: DefectClassification;
   justification?: string;
+  decided_by?: string;
   created_at: string;
 }
 

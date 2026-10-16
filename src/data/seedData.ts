@@ -686,7 +686,7 @@ export const INITIAL_TIME_LOGS: TimeLog[] = [
     user_id: 'usr-emp-1',
     log_type: 'corrective_maintenance',
     bug_id: 'bug-101',
-    hours: 4.5,
+    hours: 3.5,
     date: '2026-10-05',
     description: 'Debugging concurrent write lock contention and row-level locks on escrow balances.',
     approval_status: 'approved',
@@ -703,7 +703,7 @@ export const INITIAL_TIME_LOGS: TimeLog[] = [
     user_id: 'usr-emp-1',
     log_type: 'corrective_maintenance',
     bug_id: 'bug-101',
-    hours: 4.0,
+    hours: 3.0,
     date: '2026-10-06',
     description: 'Refactoring batch settlement query into Postgres advisory locks with idempotency test suite.',
     approval_status: 'approved',
@@ -887,7 +887,7 @@ export const INITIAL_POLICY: PayrollPolicy = {
   currency: 'INR',
   deduction_rate_percentage: 100, // 100% of hourly rate for attributable corrective hours
   max_deduction_cap_percentage: 15, // Maximum 15% of base monthly salary can be deducted
-  monthly_grace_hours: 2.0, // 2 free hours of corrective rework per employee per month
+  monthly_grace_hours: 0, // Direct 1:1 attribution for approved corrective rework
   defect_attribution_window_days: 30, // Defect must be logged within 30 days of module delivery
   require_manager_approval: true,
   updated_at: '2026-10-01T00:00:00Z',
@@ -903,16 +903,16 @@ export const INITIAL_PAYROLL: PayrollRecord[] = [
     base_salary: 90000,
     hourly_rate: 600,
     regular_hours_worked: 160,
-    total_corrective_hours: 8.5, // 4.5 + 4.0
-    attributable_corrective_hours: 8.5,
+    total_corrective_hours: 6.5, // 3.5 + 3.0
+    attributable_corrective_hours: 6.5,
     exempt_corrective_hours: 0,
-    billable_deduction_hours: 6.5, // 8.5 hrs - 2.0 hrs grace
+    billable_deduction_hours: 6.5,
     gross_deduction_amount: 3900.00, // 6.5 hrs * ₹600/hr * 100%
     deduction_amount: 3900.00, // Cap is ₹13,500 (15% of ₹90,000), so ₹3,900 is under cap
     deduction_cap_applied: false,
     net_payout: 86100.00, // ₹90,000 - ₹3,900
     status: 'reviewed',
-    notes: '8.5 approved corrective hours on Payment Reconciliation ledger (Bug #BUG-101). 2.0 hours grace applied. 6.5 hours billed at ₹600/hr.',
+    notes: '6.5 approved corrective hours on Payment Reconciliation ledger (Bug #BUG-101). 6.5 hours billed at ₹600/hr = ₹3,900 deduction.',
     created_at: '2026-10-16T08:00:00Z',
   },
   {
@@ -1261,9 +1261,9 @@ export const INITIAL_DEDUCTION_ITEMS: PayrollDeductionItem[] = [
     module_id: 'mod-101',
     bug_id: 'bug-101',
     work_date: '2026-10-06',
-    hours: 4.5,
+    hours: 3.5,
     hourly_rate: 600,
-    amount: 2100.00, // Proportion after grace
+    amount: 2100.00,
     attribution_reason: 'Original delivery defect - serializable isolation missing in payment batch cursor',
     approval_reference: 'Approved by Manager Sarah Jenkins (log-103)',
     created_at: '2026-10-16T08:00:00Z',
@@ -1277,7 +1277,7 @@ export const INITIAL_DEDUCTION_ITEMS: PayrollDeductionItem[] = [
     module_id: 'mod-101',
     bug_id: 'bug-101',
     work_date: '2026-10-07',
-    hours: 4.0,
+    hours: 3.0,
     hourly_rate: 600,
     amount: 1800.00,
     attribution_reason: 'Original delivery defect - escrow table duplicate locking verification',

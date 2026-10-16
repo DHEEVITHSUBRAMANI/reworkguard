@@ -54,7 +54,7 @@ async function runPayrollTests() {
     effective_start_date: '2026-01-01',
     is_active: true,
     rate_basis: 'contract_rate',
-    currency: 'USD',
+    currency: 'INR',
     rounding_mode: 'round_half_even',
     destination_month_offset: 1,
     policy_version: 'v2.0',
@@ -250,13 +250,13 @@ async function runPayrollTests() {
   // ------------------------------------------------------------------------
   console.log('\n[3] Integer Minor-Units (Cents) Money Arithmetic & Rounding');
 
-  // Test 3.33 hours @ $52.75/hr @ 100%
+  // Test 3.33 hours @ ₹52.75/hr @ 100%
   // 3.33 * 52.75 = 175.6575 -> rounded to 175.66
   const moneyResult = PayrollEngine.multiplyMoney(3.33, 52.75, 100, 'round_half_even');
-  assertEqual(moneyResult, 175.66, 'Precisely rounds 3.33h * $52.75 to $175.66 without floating epsilon');
+  assertEqual(moneyResult, 175.66, 'Precisely rounds 3.33h * ₹52.75 to ₹175.66 without floating epsilon');
 
   // Test half-even banker's rounding on .005
-  // 1.00h * $10.025 @ 100% -> rounds to 10.02 (even)
+  // 1.00h * 10.025 @ 100% -> rounds to 10.02 (even)
   const bankerEven = PayrollEngine.multiplyMoney(1.0, 10.025, 100, 'round_half_even');
   assertEqual(bankerEven, 10.02, "Banker's round_half_even rounds to nearest even cent");
 
@@ -272,7 +272,7 @@ async function runPayrollTests() {
       effective_date: '2026-10-01',
       hourly_rate: 45.0,
       base_monthly_salary: 8000,
-      currency: 'USD',
+      currency: 'INR',
       active_status: true,
       created_at: '2026-01-01T00:00:00Z'
     },
@@ -282,7 +282,7 @@ async function runPayrollTests() {
       effective_date: '2026-11-01',
       hourly_rate: 85.0, // Major raise starting November 1
       base_monthly_salary: 8000,
-      currency: 'USD',
+      currency: 'INR',
       active_status: true,
       created_at: '2026-11-01T00:00:00Z'
     }
@@ -303,13 +303,13 @@ async function runPayrollTests() {
     }
   ];
 
-  // Work done on 2026-10-20 should receive the $45.00 historical rate, NOT current $85.00 rate
+  // Work done on 2026-10-20 should receive the ₹45.00 historical rate, NOT current ₹85.00 rate
   const resolvedRateOct = PayrollEngine.getEffectiveRate('usr-dev-1', '2026-10-20', mockRates, mockUsers);
-  assertEqual(resolvedRateOct.hourlyRate, 45.0, 'Picks historical effective rate for October work date ($45 vs current $85)');
+  assertEqual(resolvedRateOct.hourlyRate, 45.0, 'Picks historical effective rate for October work date (₹45 vs current ₹85)');
 
-  // Work done on 2026-11-05 should receive the $85.00 rate
+  // Work done on 2026-11-05 should receive the ₹85.00 rate
   const resolvedRateNov = PayrollEngine.getEffectiveRate('usr-dev-1', '2026-11-05', mockRates, mockUsers);
-  assertEqual(resolvedRateNov.hourlyRate, 85.0, 'Picks new effective rate for November work date ($85.00)');
+  assertEqual(resolvedRateNov.hourlyRate, 85.0, 'Picks new effective rate for November work date (₹85.00)');
 
   // ------------------------------------------------------------------------
   // TEST GROUP 5: Monthly Calculation & Grace Allowance & Caps
@@ -326,8 +326,8 @@ async function runPayrollTests() {
   const deductionItems = StorageService.getDeductionItems();
   assert(deductionItems.length > 0, `Deduction items stored: ${deductionItems.length}`);
   const firstItem = deductionItems[0];
-  assert(firstItem.hourly_rate > 0, `Line item captures frozen hourly_rate: $${firstItem.hourly_rate}`);
-  assert(firstItem.amount > 0, `Line item captures calculated amount: $${firstItem.amount}`);
+  assert(firstItem.hourly_rate > 0, `Line item captures frozen hourly_rate: ₹${firstItem.hourly_rate}`);
+  assert(firstItem.amount > 0, `Line item captures calculated amount: ₹${firstItem.amount}`);
   assert(Boolean(firstItem.source_time_log_id), 'Line item references source_time_log_id');
 
   // ------------------------------------------------------------------------
@@ -412,8 +412,8 @@ async function runPayrollTests() {
       'Finance Director'
     );
     assert(validAdj.success, 'Adjustment authorized and created successfully');
-    assertEqual(validAdj.updatedRecord?.other_authorized_adjustments, 50.0, 'other_authorized_adjustments updated to $50.00');
-    assertEqual(validAdj.updatedRecord?.net_payout, originalNet + 50.0, 'Net payout increased by exactly $50.00');
+    assertEqual(validAdj.updatedRecord?.other_authorized_adjustments, 50.0, 'other_authorized_adjustments updated to ₹50.00');
+    assertEqual(validAdj.updatedRecord?.net_payout, originalNet + 50.0, 'Net payout increased by exactly ₹50.00');
 
     // Check adjustment history persistence
     const adjustments = StorageService.getPayrollAdjustments().filter(a => a.payroll_record_id === finalizedRecord.id);

@@ -434,7 +434,7 @@ export const Bugs: React.FC = () => {
                               {originalDev?.full_name}
                             </span>
                             <span className="text-[10px] text-slate-400">
-                              ${originalDev?.hourly_rate}/hr rate
+                              ₹{originalDev?.hourly_rate}/hr rate
                             </span>
                           </div>
                         </div>

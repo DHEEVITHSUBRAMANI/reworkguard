@@ -10,7 +10,7 @@
  * 4. Corrective logs cannot be submitted as normal development time (requires bug, work_type, valid hours & date).
  * 5. Unauthorized users cannot approve their own logs (self-approval forbidden).
  * 6. Rejected or pending hours do not enter deduction calculations.
- * 7. Exempt external issues are not deducted (requires written justification, yields $0 deduction).
+ * 7. Exempt external issues are not deducted (requires written justification, yields ₹0 deduction).
  * 8. Reopened tasks cannot close without verified bug resolution (failed verification returns to under_fix).
  * 9. Every important lifecycle action is auditable (task_state_history, bug_attribution_history).
  */

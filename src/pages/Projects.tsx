@@ -579,7 +579,7 @@ export const Projects: React.FC = () => {
                     <img src={c?.avatar_url} alt={c?.full_name} className="w-7 h-7 rounded-full object-cover" />
                     <div>
                       <span className="font-semibold text-slate-800 block">{c?.full_name}</span>
-                      <span className="text-[10px] text-slate-400 capitalize">{c?.role} • ${c?.hourly_rate}/hr</span>
+                      <span className="text-[10px] text-slate-400 capitalize">{c?.role} • ₹{c?.hourly_rate}/hr</span>
                     </div>
                   </div>
                 ))}

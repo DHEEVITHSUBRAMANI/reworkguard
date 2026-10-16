@@ -195,7 +195,7 @@ export const Settings: React.FC = () => {
                 className="w-full text-xs font-mono font-bold px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 bg-white"
               >
                 <option value="contract_rate">Contract Hourly Rate (Effective on work date)</option>
-                <option value="standard_rate">Standard Standard Blended Policy Rate ($50.00)</option>
+                <option value="standard_rate">Standard Blended Policy Rate (₹500.00)</option>
               </select>
             </div>
 
@@ -238,13 +238,11 @@ export const Settings: React.FC = () => {
                 </select>
                 <select
                   disabled={!canConfigurePolicy}
-                  value={formData.currency || 'USD'}
+                  value={formData.currency || 'INR'}
                   onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                   className="text-xs font-mono font-bold px-2 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 bg-white"
                 >
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GBP">GBP (£)</option>
+                  <option value="INR">INR (₹)</option>
                 </select>
               </div>
             </div>

@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS employee_rates (
   effective_date DATE NOT NULL,
   hourly_rate NUMERIC(10, 2) NOT NULL CHECK (hourly_rate > 0),
   base_monthly_salary NUMERIC(10, 2) NOT NULL CHECK (base_monthly_salary > 0),
-  currency TEXT NOT NULL DEFAULT 'USD',
+  currency TEXT NOT NULL DEFAULT 'INR',
   active_status BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS employee_rates (
 CREATE TABLE IF NOT EXISTS payroll_policies (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'INR',
   deduction_rate_percentage NUMERIC(5, 2) NOT NULL DEFAULT 100.0 CHECK (deduction_rate_percentage >= 0 AND deduction_rate_percentage <= 100),
   max_deduction_cap_percentage NUMERIC(5, 2) NOT NULL DEFAULT 15.0 CHECK (max_deduction_cap_percentage >= 0 AND max_deduction_cap_percentage <= 100),
   monthly_grace_hours NUMERIC(5, 2) NOT NULL DEFAULT 2.0 CHECK (monthly_grace_hours >= 0),
@@ -427,13 +428,13 @@ INSERT INTO public.profiles (id, full_name, email, role, active, avatar_url, dep
 ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name;
 
 INSERT INTO public.employee_rates (id, employee_id, effective_date, hourly_rate, base_monthly_salary, currency, active_status) VALUES
-('r0000001-0000-4000-a000-000000000001', '11111111-1111-4000-a000-000000000001', '2026-01-01', 65.00, 10500.00, 'USD', true),
-('r0000002-0000-4000-a000-000000000002', '22222222-2222-4000-a000-000000000002', '2026-01-01', 60.00, 9500.00, 'USD', true),
-('r0000003-0000-4000-a000-000000000003', '33333333-3333-4000-a000-000000000003', '2026-01-01', 52.00, 8200.00, 'USD', true),
-('r0000004-0000-4000-a000-000000000004', '44444444-4444-4000-a000-000000000004', '2026-01-01', 45.00, 7200.00, 'USD', true),
-('r0000005-0000-4000-a000-000000000005', '55555555-5555-4000-a000-000000000005', '2026-01-01', 40.00, 6400.00, 'USD', true),
-('r0000006-0000-4000-a000-000000000006', '66666666-6666-4000-a000-000000000006', '2026-01-01', 48.00, 7600.00, 'USD', true),
-('r0000007-0000-4000-a000-000000000007', '77777777-7777-4000-a000-000000000007', '2026-01-01', 46.00, 7300.00, 'USD', true)
+('r0000001-0000-4000-a000-000000000001', '11111111-1111-4000-a000-000000000001', '2026-01-01', 900.00, 150000.00, 'INR', true),
+('r0000002-0000-4000-a000-000000000002', '22222222-2222-4000-a000-000000000002', '2026-01-01', 850.00, 140000.00, 'INR', true),
+('r0000003-0000-4000-a000-000000000003', '33333333-3333-4000-a000-000000000003', '2026-01-01', 750.00, 120000.00, 'INR', true),
+('r0000004-0000-4000-a000-000000000004', '44444444-4444-4000-a000-000000000004', '2026-01-01', 600.00, 90000.00, 'INR', true),
+('r0000005-0000-4000-a000-000000000005', '55555555-5555-4000-a000-000000000005', '2026-01-01', 450.00, 75000.00, 'INR', true),
+('r0000006-0000-4000-a000-000000000006', '66666666-6666-4000-a000-000000000006', '2026-01-01', 500.00, 80000.00, 'INR', true),
+('r0000007-0000-4000-a000-000000000007', '77777777-7777-4000-a000-000000000007', '2026-01-01', 550.00, 85000.00, 'INR', true)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.payroll_policies (id, name, deduction_rate_percentage, max_deduction_cap_percentage, monthly_grace_hours, defect_attribution_window_days, require_manager_approval, is_active) VALUES

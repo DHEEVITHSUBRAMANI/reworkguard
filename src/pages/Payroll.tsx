@@ -505,7 +505,7 @@ export const Payroll: React.FC = () => {
 
                       {/* Hourly Rate */}
                       <td className="px-4 py-3.5 whitespace-nowrap font-mono text-slate-600">
-                        <span>${record.hourly_rate}/hr</span>
+                        <span>₹{record.hourly_rate}/hr</span>
                         <span className="block text-[10px] text-slate-400">contract rate</span>
                       </td>
 
@@ -534,7 +534,7 @@ export const Payroll: React.FC = () => {
                           'font-bold text-xs',
                           hasDeduction ? 'text-rose-600' : 'text-slate-400'
                         )}>
-                          {hasDeduction ? `-${formatCurrency(record.deduction_amount)}` : '$0.00'}
+                          {hasDeduction ? `-${formatCurrency(record.deduction_amount)}` : formatCurrency(0)}
                         </span>
                         {record.deduction_cap_applied && (
                           <span className="block text-[10px] text-amber-600 font-bold uppercase mt-0.5">
@@ -553,7 +553,7 @@ export const Payroll: React.FC = () => {
                             {record.other_authorized_adjustments > 0 ? `+${formatCurrency(record.other_authorized_adjustments)}` : formatCurrency(record.other_authorized_adjustments)}
                           </span>
                         ) : (
-                          <span className="text-slate-400">$0.00</span>
+                          <span className="text-slate-400">{formatCurrency(0)}</span>
                         )}
                         {recordAdjs.length > 0 && (
                           <span className="block text-[10px] text-slate-400 font-sans">
@@ -674,14 +674,14 @@ export const Payroll: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Adjustment Amount ($)
+                Adjustment Amount (₹)
               </label>
               <input
                 type="number"
                 step="0.01"
                 value={adjustmentAmount}
                 onChange={(e) => setAdjustmentAmount(e.target.value)}
-                placeholder="e.g. 50.00 (positive increases net pay)"
+                placeholder="e.g. 500.00 (positive increases net pay)"
                 className="w-full text-xs font-mono font-bold px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               <span className="text-[11px] text-slate-400 mt-1 block">
@@ -753,7 +753,7 @@ export const Payroll: React.FC = () => {
                       <h4 className="text-base font-bold text-slate-900">{emp?.full_name}</h4>
                       <p className="text-slate-500 text-xs">{emp?.department} • {emp?.email}</p>
                       <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 font-mono">
-                        <span>Contract Rate: ${selectedRecord.hourly_rate}/hr</span>
+                        <span>Contract Rate: ₹{selectedRecord.hourly_rate}/hr</span>
                         <span>•</span>
                         <span>Quality Score: {emp?.quality_score}%</span>
                       </div>
@@ -826,7 +826,7 @@ export const Payroll: React.FC = () => {
 
                 <div className="flex justify-between items-center py-1 border-b border-rose-100/70">
                   <span className="text-slate-600">
-                    Gross Calculation ({selectedRecord.billable_deduction_hours}h × ${selectedRecord.hourly_rate}/hr × {policy.deduction_rate_percentage}%):
+                    Gross Calculation ({selectedRecord.billable_deduction_hours}h × ₹{selectedRecord.hourly_rate}/hr × {policy.deduction_rate_percentage}%):
                   </span>
                   <span className="font-mono font-bold text-slate-900">{formatCurrency(selectedRecord.gross_deduction_amount)}</span>
                 </div>
@@ -859,7 +859,7 @@ export const Payroll: React.FC = () => {
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="font-bold text-slate-900">{item.hours}h</span>
-                                <span>@ ${item.hourly_rate}/hr</span>
+                                <span>@ ₹{item.hourly_rate}/hr</span>
                                 <span className="text-slate-400">•</span>
                                 <span className="text-rose-600 font-semibold">{item.bug_id || 'Defect Rework'}</span>
                                 {item.work_date && (
@@ -871,7 +871,7 @@ export const Payroll: React.FC = () => {
                               </p>
                             </div>
                             <span className="font-bold text-rose-700">
-                              -${item.amount.toFixed(2)}
+                              -{formatCurrency(item.amount)}
                             </span>
                           </div>
                         ))}

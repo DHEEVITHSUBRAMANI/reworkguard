@@ -156,15 +156,15 @@ export const PayrollEngine = {
       return {
         hourlyRate: matchingRates[0].hourly_rate,
         baseSalary: matchingRates[0].base_monthly_salary,
-        currency: matchingRates[0].currency || 'USD',
+        currency: matchingRates[0].currency || 'INR',
       };
     }
 
     const user = users.find(u => u.id === employeeId);
     return {
-      hourlyRate: user?.hourly_rate ?? 50,
-      baseSalary: user?.base_monthly_salary ?? 7000,
-      currency: 'USD',
+      hourlyRate: user?.hourly_rate ?? 500,
+      baseSalary: user?.base_monthly_salary ?? 60000,
+      currency: 'INR',
     };
   },
 
@@ -337,7 +337,7 @@ export const PayrollEngine = {
         net_salary: netSalary,
         status: recordStatus,
         processing_status: recordStatus,
-        notes: `${attributableHours}h attributable corrective rework in ${sourceMonth}. Grace applied: ${graceHours}h. Billable: ${billableDeductionHours}h @ $${hourlyRate}/hr (${policy.deduction_rate_percentage}%). Cap: $${salaryCapAmount.toFixed(2)}${deductionCapApplied ? ' (CAP REACHED)' : ''}.`,
+        notes: `${attributableHours}h attributable corrective rework in ${sourceMonth}. Grace applied: ${graceHours}h. Billable: ${billableDeductionHours}h @ ₹${hourlyRate}/hr (${policy.deduction_rate_percentage}%). Cap: ₹${salaryCapAmount.toFixed(2)}${deductionCapApplied ? ' (CAP REACHED)' : ''}.`,
         created_at: existingRecord?.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -397,7 +397,7 @@ export const PayrollEngine = {
           user_id: employee.id,
           recipient_id: employee.id,
           title: `Proposed Rework Deduction for ${targetMonth}`,
-          message: `Preliminary calculation from ${sourceMonth} corrective rework shows $${finalDeductionAmount.toFixed(2)} (${billableDeductionHours}h billable at $${hourlyRate}/hr after ${graceHours}h grace). Please review your payslip preview. If you dispute attribution, contact your manager before cutoff.`,
+          message: `Preliminary calculation from ${sourceMonth} corrective rework shows ₹${finalDeductionAmount.toFixed(2)} (${billableDeductionHours}h billable at ₹${hourlyRate}/hr after ${graceHours}h grace). Please review your payslip preview. If you dispute attribution, contact your manager before cutoff.`,
           type: 'warning',
           notification_type: 'warning',
           read: false,
@@ -459,7 +459,7 @@ export const PayrollEngine = {
         action: 'PAYROLL_CALCULATED',
         entity_type: 'payroll' as const,
         entity_id: targetMonth,
-        details: `Calculated payroll for ${targetMonth} from ${sourceMonth} rework: ${calculatedRecords.length} records, $${(totalProposed + totalApproved).toFixed(2)} total deductions.`,
+        details: `Calculated payroll for ${targetMonth} from ${sourceMonth} rework: ${calculatedRecords.length} records, ₹${(totalProposed + totalApproved).toFixed(2)} total deductions.`,
         created_at: new Date().toISOString(),
       };
       StorageService.setAuditLogs([auditLog, ...StorageService.getAuditLogs()]);
@@ -522,7 +522,7 @@ export const PayrollEngine = {
       action: 'PAYROLL_FINALIZED',
       entity_type: 'payroll' as const,
       entity_id: recordId,
-      details: `Authorized and finalized payroll record for employee ${record.employee_id} (Period: ${record.period}, Net: $${record.net_payout.toFixed(2)}, Deduction: $${record.deduction_amount.toFixed(2)}). Locked ${sourceLogIds.length} source time logs.`,
+      details: `Authorized and finalized payroll record for employee ${record.employee_id} (Period: ${record.period}, Net: ₹${record.net_payout.toFixed(2)}, Deduction: ₹${record.deduction_amount.toFixed(2)}). Locked ${sourceLogIds.length} source time logs.`,
       created_at: now,
     };
     StorageService.setAuditLogs([auditLog, ...StorageService.getAuditLogs()]);
@@ -533,7 +533,7 @@ export const PayrollEngine = {
       user_id: record.employee_id,
       recipient_id: record.employee_id,
       title: `Payslip Finalized (${record.period})`,
-      message: `Your payslip for ${record.period} has been officially finalized by Finance ($${record.net_payout.toFixed(2)} net disbursal). You may download or print your finalized payslip.`,
+      message: `Your payslip for ${record.period} has been officially finalized by Finance (₹${record.net_payout.toFixed(2)} net disbursal). You may download or print your finalized payslip.`,
       type: 'success',
       notification_type: 'success',
       read: false,
@@ -607,7 +607,7 @@ export const PayrollEngine = {
       action: 'PAYROLL_ADJUSTMENT_CREATED',
       entity_type: 'payroll' as const,
       entity_id: recordId,
-      details: `Created ${adjustmentType} adjustment of $${amount.toFixed(2)} on record ${recordId}. Reason: "${reason}". New Net Salary: $${newNetSalary.toFixed(2)}.`,
+      details: `Created ${adjustmentType} adjustment of ₹${amount.toFixed(2)} on record ${recordId}. Reason: "${reason}". New Net Salary: ₹${newNetSalary.toFixed(2)}.`,
       created_at: now,
     };
     StorageService.setAuditLogs([auditLog, ...StorageService.getAuditLogs()]);

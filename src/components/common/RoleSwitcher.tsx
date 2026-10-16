@@ -117,7 +117,7 @@ export const RoleSwitcher: React.FC = () => {
                         {getRoleIcon(user.role)}
                         <span className="capitalize">{formatRoleName(user.role)}</span>
                         <span className="text-slate-300">•</span>
-                        <span>${user.hourly_rate}/hr</span>
+                        <span>₹{user.hourly_rate}/hr</span>
                       </div>
                     </div>
                   </div>
@@ -128,8 +128,8 @@ export const RoleSwitcher: React.FC = () => {
           </div>
 
           <div className="p-2 border-t border-slate-100 bg-slate-50/70 text-[11px] text-slate-500 flex items-center justify-between">
-            <span>Base Salary: ${(currentUser.base_monthly_salary ?? 0).toLocaleString()}</span>
-            <span>Rate: ${currentUser.hourly_rate ?? 0}/hr</span>
+            <span>Base Salary: ₹{(currentUser.base_monthly_salary ?? 0).toLocaleString('en-IN')}</span>
+            <span>Rate: ₹{currentUser.hourly_rate ?? 0}/hr</span>
           </div>
 
           <div className="p-2 border-t border-slate-100">

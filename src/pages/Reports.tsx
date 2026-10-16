@@ -559,7 +559,7 @@ export const Reports: React.FC = () => {
                   <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
                   <Tooltip
                     formatter={(val: number, name: string) => [
-                      name === 'deductionsSaved' ? `$${val}` : `${val} hrs`,
+                      name === 'deductionsSaved' ? formatCurrency(Number(val)) : `${val} hrs`,
                       name === 'deductionsSaved' ? 'Policy Deduction Savings' : 'Corrective Hours'
                     ]}
                     contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
@@ -567,7 +567,7 @@ export const Reports: React.FC = () => {
                   <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                   <Bar dataKey="totalReworkHours" name="Total Corrective Hours" fill="#F59E0B" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="attributableHours" name="Eligible Attributable Hours" fill="#EF4444" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="deductionsSaved" name="Recovered Savings ($)" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="deductionsSaved" name="Recovered Savings (₹)" fill="#2563EB" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

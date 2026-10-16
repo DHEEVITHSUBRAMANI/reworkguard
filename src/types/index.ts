@@ -213,6 +213,9 @@ export interface EmployeeRate {
   created_at?: string;
 }
 
+export type RateBasis = 'employee_effective_rate' | 'blended_rate' | 'contract_rate' | 'fixed_policy_rate';
+export type RoundingMode = 'round_half_up' | 'truncate';
+
 export interface PayrollPolicy {
   id: string;
   name: string;
@@ -222,11 +225,31 @@ export interface PayrollPolicy {
   monthly_grace_hours: number;
   defect_attribution_window_days: number;
   require_manager_approval: boolean;
+  rate_basis?: RateBasis;
+  currency?: string;
+  rounding_mode?: RoundingMode;
+  destination_month_offset?: number; // e.g. 1 = following month
+  policy_version?: number;
+  allow_no_deduction_override?: boolean;
   effective_date?: string;
   updated_at: string;
 }
 
-export type PayrollStatus = 'draft' | 'reviewed' | 'finalized' | 'paid';
+export type PayrollStatus = 'draft' | 'under_review' | 'reviewed' | 'approved' | 'finalized' | 'paid';
+
+export type AdjustmentType = 'reversal' | 'correction' | 'policy_relief' | 'dispute_settlement';
+
+export interface PayrollAdjustment {
+  id: string;
+  payroll_record_id: string;
+  employee_id: string;
+  adjustment_type: AdjustmentType;
+  amount: number;
+  reason: string;
+  authorized_by: string;
+  authorizer_name?: string;
+  created_at: string;
+}
 
 export interface PayrollRecord {
   id: string;
@@ -262,9 +285,11 @@ export interface PayrollDeductionItem {
   id: string;
   payroll_record_id: string;
   source_time_log_id: string;
+  employee_id?: string;
   task_id?: string;
   module_id?: string;
   bug_id?: string;
+  work_date?: string;
   hours: number;
   hourly_rate: number;
   amount: number;

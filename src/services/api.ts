@@ -12,6 +12,8 @@ import {
   PayrollPolicy, 
   AuditLog, 
   AppNotification, 
+  PayrollAdjustment,
+  AdjustmentType,
   EmployeeRate,
   TaskStateHistory,
   TaskDeliveryContributor,
@@ -22,6 +24,7 @@ import {
   BugAttributionRecord,
   BugStatus
 } from '../types';
+import { PayrollEngine, PayrollCalculationSummary } from './payrollEngine';
 
 /**
  * ReworkGuard Unified Data-Access Layer
@@ -754,30 +757,106 @@ export const payrollApi = {
       const { data, error } = await query;
       if (!error && data) return data;
     }
-    return StorageService.getPayroll();
+    const all = StorageService.getPayroll();
+    if (month) {
+      return all.filter(r => r.period === month || r.payroll_month === month);
+    }
+    return all;
   },
 
-  async finalize(recordId: string, finalizedBy: string): Promise<boolean> {
-    const now = new Date().toISOString();
+  async getDeductionItems(recordId?: string): Promise<PayrollDeductionItem[]> {
     if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase
-        .from('payroll_records')
-        .update({
-          processing_status: 'finalized',
-          status: 'finalized',
-          finalized_by: finalizedBy,
-          finalized_at: now
-        })
-        .eq('id', recordId);
-      if (!error) return true;
+      let query = supabase.from('payroll_deduction_items').select('*');
+      if (recordId) query = query.eq('payroll_record_id', recordId);
+      const { data, error } = await query;
+      if (!error && data) return data;
     }
-    const records = StorageService.getPayroll().map(r => r.id === recordId ? {
-      ...r,
-      status: 'finalized' as const,
-      finalized_by: finalizedBy,
-      finalized_at: now
-    } : r);
-    StorageService.setPayroll(records);
-    return true;
+    const all = StorageService.getDeductionItems();
+    if (recordId) {
+      return all.filter(i => i.payroll_record_id === recordId);
+    }
+    return all;
+  },
+
+  async getAdjustments(recordId?: string): Promise<PayrollAdjustment[]> {
+    if (isSupabaseConfigured && supabase) {
+      let query = supabase.from('payroll_adjustments').select('*');
+      if (recordId) query = query.eq('payroll_record_id', recordId);
+      const { data, error } = await query;
+      if (!error && data) return data;
+    }
+    const all = StorageService.getPayrollAdjustments();
+    if (recordId) {
+      return all.filter(a => a.payroll_record_id === recordId);
+    }
+    return all;
+  },
+
+  async getEmployeeRates(employeeId?: string): Promise<EmployeeRate[]> {
+    if (isSupabaseConfigured && supabase) {
+      let query = supabase.from('employee_rates').select('*');
+      if (employeeId) query = query.eq('employee_id', employeeId);
+      const { data, error } = await query;
+      if (!error && data) return data;
+    }
+    const all = StorageService.getEmployeeRates();
+    if (employeeId) {
+      return all.filter(r => r.employee_id === employeeId);
+    }
+    return all;
+  },
+
+  async getPolicy(): Promise<PayrollPolicy> {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from('payroll_policies').select('*').limit(1).single();
+      if (!error && data) return data;
+    }
+    return StorageService.getPayrollPolicy();
+  },
+
+  async updatePolicy(policy: PayrollPolicy): Promise<PayrollPolicy> {
+    if (isSupabaseConfigured && supabase) {
+      await supabase.from('payroll_policies').upsert(policy);
+    }
+    StorageService.setPayrollPolicy(policy);
+    return policy;
+  },
+
+  calculate(
+    targetMonth: string, 
+    sourceMonth: string, 
+    policy?: PayrollPolicy, 
+    options: { dryRun?: boolean; calculatedBy?: string; calculatedByName?: string } = {}
+  ): PayrollCalculationSummary {
+    const effectivePolicy = policy || StorageService.getPayrollPolicy();
+    return PayrollEngine.calculateMonthlyPayroll(targetMonth, sourceMonth, effectivePolicy, options);
+  },
+
+  async finalize(
+    recordId: string, 
+    finalizedBy: string, 
+    finalizerName: string = 'Finance Admin'
+  ): Promise<{ success: boolean; record?: PayrollRecord; error?: string }> {
+    const res = PayrollEngine.finalizePayrollRecord(recordId, finalizedBy, finalizerName);
+    if (res.success && isSupabaseConfigured && supabase && res.record) {
+      await supabase.from('payroll_records').update(res.record).eq('id', recordId);
+    }
+    return res;
+  },
+
+  async createAdjustment(
+    recordId: string,
+    adjustmentType: AdjustmentType,
+    amount: number,
+    reason: string,
+    authorizedBy: string,
+    authorizerName: string = 'Finance Admin'
+  ): Promise<{ success: boolean; adjustment?: PayrollAdjustment; updatedRecord?: PayrollRecord; error?: string }> {
+    const res = PayrollEngine.createPayrollAdjustment(recordId, adjustmentType, amount, reason, authorizedBy, authorizerName);
+    if (res.success && isSupabaseConfigured && supabase && res.adjustment && res.updatedRecord) {
+      await supabase.from('payroll_adjustments').insert(res.adjustment);
+      await supabase.from('payroll_records').update(res.updatedRecord).eq('id', recordId);
+    }
+    return res;
   }
 };

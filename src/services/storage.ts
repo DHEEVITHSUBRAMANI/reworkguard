@@ -10,7 +10,10 @@ import {
   AuditLog, 
   AppNotification,
   TaskStateHistory,
-  BugAttributionRecord
+  BugAttributionRecord,
+  EmployeeRate,
+  PayrollDeductionItem,
+  PayrollAdjustment
 } from '../types';
 import { 
   INITIAL_USERS, 
@@ -24,7 +27,10 @@ import {
   INITIAL_AUDIT_LOGS, 
   INITIAL_NOTIFICATIONS,
   INITIAL_TASK_STATE_HISTORY,
-  INITIAL_BUG_ATTRIBUTION_HISTORY
+  INITIAL_BUG_ATTRIBUTION_HISTORY,
+  INITIAL_EMPLOYEE_RATES,
+  INITIAL_DEDUCTION_ITEMS,
+  INITIAL_PAYROLL_ADJUSTMENTS
 } from '../data/seedData';
 
 const STORAGE_KEYS = {
@@ -42,6 +48,9 @@ const STORAGE_KEYS = {
   SELECTED_MONTH: 'reworkguard_selected_month_v1',
   TASK_STATE_HISTORY: 'reworkguard_task_history_v1',
   BUG_ATTRIBUTION_HISTORY: 'reworkguard_bug_attributions_v1',
+  EMPLOYEE_RATES: 'reworkguard_employee_rates_v1',
+  DEDUCTION_ITEMS: 'reworkguard_deduction_items_v1',
+  PAYROLL_ADJUSTMENTS: 'reworkguard_payroll_adjustments_v1',
 };
 
 const memoryStore: Record<string, string> = {};
@@ -124,6 +133,8 @@ export const StorageService = {
 
   getPolicy: (): PayrollPolicy => getFromStorage(STORAGE_KEYS.POLICY, INITIAL_POLICY),
   setPolicy: (policy: PayrollPolicy) => setToStorage(STORAGE_KEYS.POLICY, policy),
+  getPayrollPolicy: (): PayrollPolicy => getFromStorage(STORAGE_KEYS.POLICY, INITIAL_POLICY),
+  setPayrollPolicy: (policy: PayrollPolicy) => setToStorage(STORAGE_KEYS.POLICY, policy),
 
   getPayroll: (): PayrollRecord[] => getFromStorage(STORAGE_KEYS.PAYROLL, INITIAL_PAYROLL),
   setPayroll: (records: PayrollRecord[]) => setToStorage(STORAGE_KEYS.PAYROLL, records),
@@ -146,6 +157,15 @@ export const StorageService = {
   getBugAttributions: (): BugAttributionRecord[] => getFromStorage(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, INITIAL_BUG_ATTRIBUTION_HISTORY),
   setBugAttributions: (records: BugAttributionRecord[]) => setToStorage(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, records),
 
+  getEmployeeRates: (): EmployeeRate[] => getFromStorage(STORAGE_KEYS.EMPLOYEE_RATES, INITIAL_EMPLOYEE_RATES),
+  setEmployeeRates: (rates: EmployeeRate[]) => setToStorage(STORAGE_KEYS.EMPLOYEE_RATES, rates),
+
+  getDeductionItems: (): PayrollDeductionItem[] => getFromStorage(STORAGE_KEYS.DEDUCTION_ITEMS, INITIAL_DEDUCTION_ITEMS),
+  setDeductionItems: (items: PayrollDeductionItem[]) => setToStorage(STORAGE_KEYS.DEDUCTION_ITEMS, items),
+
+  getPayrollAdjustments: (): PayrollAdjustment[] => getFromStorage(STORAGE_KEYS.PAYROLL_ADJUSTMENTS, INITIAL_PAYROLL_ADJUSTMENTS),
+  setPayrollAdjustments: (adjustments: PayrollAdjustment[]) => setToStorage(STORAGE_KEYS.PAYROLL_ADJUSTMENTS, adjustments),
+
   resetToSeedData: () => {
     setToStorage(STORAGE_KEYS.USERS, INITIAL_USERS);
     setToStorage(STORAGE_KEYS.PROJECTS, INITIAL_PROJECTS);
@@ -161,5 +181,8 @@ export const StorageService = {
     setToStorage(STORAGE_KEYS.SELECTED_MONTH, '2026-11');
     setToStorage(STORAGE_KEYS.TASK_STATE_HISTORY, INITIAL_TASK_STATE_HISTORY);
     setToStorage(STORAGE_KEYS.BUG_ATTRIBUTION_HISTORY, INITIAL_BUG_ATTRIBUTION_HISTORY);
+    setToStorage(STORAGE_KEYS.EMPLOYEE_RATES, INITIAL_EMPLOYEE_RATES);
+    setToStorage(STORAGE_KEYS.DEDUCTION_ITEMS, INITIAL_DEDUCTION_ITEMS);
+    setToStorage(STORAGE_KEYS.PAYROLL_ADJUSTMENTS, INITIAL_PAYROLL_ADJUSTMENTS);
   }
 };

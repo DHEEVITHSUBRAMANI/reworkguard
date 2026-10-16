@@ -10,7 +10,10 @@ import {
   AuditLog, 
   AppNotification,
   TaskStateHistory,
-  BugAttributionRecord
+  BugAttributionRecord,
+  EmployeeRate,
+  PayrollDeductionItem,
+  PayrollAdjustment
 } from '../types';
 
 export const INITIAL_USERS: User[] = [
@@ -1189,3 +1192,100 @@ export const INITIAL_BUG_ATTRIBUTION_HISTORY: BugAttributionRecord[] = [
     created_at: '2026-10-15T09:00:00Z',
   },
 ];
+
+export const INITIAL_EMPLOYEE_RATES: EmployeeRate[] = [
+  {
+    id: 'rate-emp-1',
+    employee_id: 'usr-emp-1',
+    effective_date: '2026-01-01',
+    hourly_rate: 45,
+    base_monthly_salary: 7200,
+    currency: 'USD',
+    active_status: true,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'rate-emp-2',
+    employee_id: 'usr-emp-2',
+    effective_date: '2026-01-01',
+    hourly_rate: 40,
+    base_monthly_salary: 6400,
+    currency: 'USD',
+    active_status: true,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'rate-emp-3',
+    employee_id: 'usr-emp-3',
+    effective_date: '2026-01-01',
+    hourly_rate: 48,
+    base_monthly_salary: 7600,
+    currency: 'USD',
+    active_status: true,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'rate-emp-4',
+    employee_id: 'usr-emp-4',
+    effective_date: '2026-01-01',
+    hourly_rate: 42,
+    base_monthly_salary: 6800,
+    currency: 'USD',
+    active_status: true,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+];
+
+export const INITIAL_DEDUCTION_ITEMS: PayrollDeductionItem[] = [
+  {
+    id: 'pdi-101',
+    payroll_record_id: 'pay-2026-11-emp1',
+    source_time_log_id: 'log-103',
+    employee_id: 'usr-emp-1',
+    task_id: 'tsk-101',
+    module_id: 'mod-101',
+    bug_id: 'bug-101',
+    work_date: '2026-10-06',
+    hours: 4.5,
+    hourly_rate: 45,
+    amount: 157.50, // Proportion after grace
+    attribution_reason: 'Original delivery defect - serializable isolation missing in payment batch cursor',
+    approval_reference: 'Approved by Manager Sarah Jenkins (log-103)',
+    created_at: '2026-10-16T08:00:00Z',
+  },
+  {
+    id: 'pdi-102',
+    payroll_record_id: 'pay-2026-11-emp1',
+    source_time_log_id: 'log-104',
+    employee_id: 'usr-emp-1',
+    task_id: 'tsk-101',
+    module_id: 'mod-101',
+    bug_id: 'bug-101',
+    work_date: '2026-10-07',
+    hours: 4.0,
+    hourly_rate: 45,
+    amount: 135.00,
+    attribution_reason: 'Original delivery defect - escrow table duplicate locking verification',
+    approval_reference: 'Approved by Manager Sarah Jenkins (log-104)',
+    created_at: '2026-10-16T08:00:00Z',
+  },
+  {
+    id: 'pdi-201',
+    payroll_record_id: 'pay-2026-11-emp3',
+    source_time_log_id: 'log-202',
+    employee_id: 'usr-emp-3',
+    task_id: 'tsk-301',
+    module_id: 'mod-301',
+    bug_id: 'bug-103',
+    work_date: '2026-10-10',
+    hours: 6.0,
+    hourly_rate: 48,
+    amount: 192.00, // 4.0h billed * $48 after 2h grace
+    attribution_reason: 'Original delivery defect - O(N^2) polygon spatial performance failure',
+    approval_reference: 'Approved by Manager Sarah Jenkins (log-202)',
+    created_at: '2026-10-16T08:00:00Z',
+  },
+];
+
+export const INITIAL_PAYROLL_ADJUSTMENTS: PayrollAdjustment[] = [];
+

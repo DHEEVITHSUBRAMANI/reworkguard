@@ -179,6 +179,100 @@ export const Settings: React.FC = () => {
                 <span className="text-xs font-bold text-slate-600">days post-delivery</span>
               </div>
             </div>
+
+            {/* Rate Basis */}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Rate Basis
+              </label>
+              <p className="text-[11px] text-slate-500 mb-3">
+                Determines whether the employee contract rate or standard blended tier rate is applied.
+              </p>
+              <select
+                disabled={!canConfigurePolicy}
+                value={formData.rate_basis || 'contract_rate'}
+                onChange={(e) => setFormData({ ...formData, rate_basis: e.target.value as any })}
+                className="w-full text-xs font-mono font-bold px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 bg-white"
+              >
+                <option value="contract_rate">Contract Hourly Rate (Effective on work date)</option>
+                <option value="standard_rate">Standard Standard Blended Policy Rate ($50.00)</option>
+              </select>
+            </div>
+
+            {/* Destination Month Offset */}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Payroll Calendar Deduction Timing
+              </label>
+              <p className="text-[11px] text-slate-500 mb-3">
+                Next-Month rule (offset = +1 month) vs Same-Month deduction.
+              </p>
+              <select
+                disabled={!canConfigurePolicy}
+                value={formData.destination_month_offset ?? 1}
+                onChange={(e) => setFormData({ ...formData, destination_month_offset: Number(e.target.value) })}
+                className="w-full text-xs font-mono font-bold px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 bg-white"
+              >
+                <option value={1}>Next-Month Deduction (+1 Month Offset e.g. Oct rework - Nov payroll)</option>
+                <option value={0}>Same-Month Deduction (0 Offset e.g. Oct rework - Oct payroll)</option>
+              </select>
+            </div>
+
+            {/* Rounding Mode & Currency */}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Monetary Arithmetic & Currency
+              </label>
+              <p className="text-[11px] text-slate-500 mb-3">
+                Authoritative integer minor units rounding method (banker&apos;s vs standard arithmetic).
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  disabled={!canConfigurePolicy}
+                  value={formData.rounding_mode || 'round_half_even'}
+                  onChange={(e) => setFormData({ ...formData, rounding_mode: e.target.value as any })}
+                  className="text-xs font-mono font-bold px-2 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 bg-white"
+                >
+                  <option value="round_half_even">Round Half Even (Banker&apos;s)</option>
+                  <option value="round_half_up">Round Half Up (Standard)</option>
+                </select>
+                <select
+                  disabled={!canConfigurePolicy}
+                  value={formData.currency || 'USD'}
+                  onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                  className="text-xs font-mono font-bold px-2 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 bg-white"
+                >
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Policy Version & Discretionary Override */}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Governance & Relief Overrides
+              </label>
+              <p className="text-[11px] text-slate-500 mb-3">
+                Policy identifier version and management relief permissions.
+              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-mono font-bold text-slate-800">Version: {formData.policy_version || 'v2.0'}</span>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    disabled={!canConfigurePolicy}
+                    checked={formData.allow_no_deduction_override ?? false}
+                    onChange={(e) => setFormData({ ...formData, allow_no_deduction_override: e.target.checked })}
+                    className="rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Allow Good-Faith Waivers</span>
+                </label>
+              </div>
+            </div>
           </div>
 
           {canConfigurePolicy ? (

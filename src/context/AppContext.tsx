@@ -7,6 +7,10 @@ import {
   TimeLog, 
   PayrollPolicy, 
   PayrollRecord, 
+  PayrollDeductionItem,
+  PayrollAdjustment,
+  AdjustmentType,
+  EmployeeRate,
   AuditLog, 
   AppNotification,
   DefectClassification,
@@ -18,7 +22,8 @@ import {
   User
 } from '../types';
 import { StorageService } from '../services/storage';
-import { tasksApi, bugsApi, timeLogsApi } from '../services/api';
+import { tasksApi, bugsApi, timeLogsApi, payrollApi } from '../services/api';
+import { PayrollCalculationSummary } from '../services/payrollEngine';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 
@@ -32,6 +37,9 @@ interface AppContextType {
   bugAttributions: BugAttributionRecord[];
   policy: PayrollPolicy;
   payrollRecords: PayrollRecord[];
+  deductionItems: PayrollDeductionItem[];
+  payrollAdjustments: PayrollAdjustment[];
+  employeeRates: EmployeeRate[];
   auditLogs: AuditLog[];
   notifications: AppNotification[];
   selectedMonth: string;
@@ -73,8 +81,14 @@ interface AppContextType {
   resubmitTimeLog: (logId: string, hours: number, description: string) => Promise<{ success: boolean; error?: string }>;
   
   updatePolicy: (policy: PayrollPolicy) => void;
-  calculatePayrollForMonth: (targetMonth: string, sourceMonth: string) => void;
-  finalizePayrollRecord: (recordId: string) => void;
+  calculatePayrollForMonth: (targetMonth: string, sourceMonth: string) => PayrollCalculationSummary;
+  finalizePayrollRecord: (recordId: string) => Promise<{ success: boolean; record?: PayrollRecord; error?: string }>;
+  addPayrollAdjustment: (
+    recordId: string, 
+    adjustmentType: AdjustmentType, 
+    amount: number, 
+    reason: string
+  ) => Promise<{ success: boolean; adjustment?: PayrollAdjustment; updatedRecord?: PayrollRecord; error?: string }>;
   
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
@@ -95,6 +109,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [bugAttributions, setBugAttributions] = useState<BugAttributionRecord[]>(() => StorageService.getBugAttributions());
   const [policy, setPolicyState] = useState<PayrollPolicy>(() => StorageService.getPolicy());
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>(() => StorageService.getPayroll());
+  const [deductionItems, setDeductionItems] = useState<PayrollDeductionItem[]>(() => StorageService.getDeductionItems());
+  const [payrollAdjustments, setPayrollAdjustments] = useState<PayrollAdjustment[]>(() => StorageService.getPayrollAdjustments());
+  const [employeeRates, setEmployeeRates] = useState<EmployeeRate[]>(() => StorageService.getEmployeeRates());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => StorageService.getAuditLogs());
   const [notifications, setNotifications] = useState<AppNotification[]>(() => StorageService.getNotifications());
   const [selectedMonth, setSelectedMonthState] = useState<string>(() => StorageService.getSelectedMonth());
@@ -456,103 +473,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Policy
   const updatePolicy = (newPolicy: PayrollPolicy) => {
+    payrollApi.updatePolicy(newPolicy);
     setPolicyState(newPolicy);
-    StorageService.setPolicy(newPolicy);
     addAuditLog('POLICY_UPDATED', 'policy', newPolicy.id, `Updated payroll deduction rules: Rate=${newPolicy.deduction_rate_percentage}%, Cap=${newPolicy.max_deduction_cap_percentage}%, Grace=${newPolicy.monthly_grace_hours}h`);
     addNotification('all', 'Payroll Policy Updated', `Deduction policy adjusted: ${newPolicy.deduction_rate_percentage}% rate, ${newPolicy.max_deduction_cap_percentage}% salary cap.`, 'warning', '/settings');
   };
 
-  // Payroll Calculation Engine
-  const calculatePayrollForMonth = (targetMonth: string, sourceMonth: string) => {
-    const updatedRecords = [...payrollRecords];
-
-    users.forEach(employee => {
-      // Find all approved time logs for this employee in source month
-      const empLogs = timeLogs.filter(l => 
-        l.user_id === employee.id && 
-        l.date.startsWith(sourceMonth) &&
-        l.approval_status === 'approved'
-      );
-
-      const regularHours = empLogs
-        .filter(l => l.log_type === 'regular')
-        .reduce((sum, l) => sum + l.hours, 0);
-
-      const correctiveLogs = empLogs.filter(l => l.log_type === 'corrective_maintenance');
-      const totalCorrectiveHours = correctiveLogs.reduce((sum, l) => sum + l.hours, 0);
-
-      const attributableHours = correctiveLogs
-        .filter(l => l.attribution_status === 'attributable')
-        .reduce((sum, l) => sum + l.hours, 0);
-
-      const exemptHours = correctiveLogs
-        .filter(l => l.attribution_status === 'exempt')
-        .reduce((sum, l) => sum + l.hours, 0);
-
-      // Apply grace hours
-      const hourlyRate = employee.hourly_rate ?? 50;
-      const baseSalary = employee.base_monthly_salary ?? 7000;
-
-      const billableDeductionHours = Math.max(0, attributableHours - policy.monthly_grace_hours);
-      const grossDeduction = billableDeductionHours * hourlyRate * (policy.deduction_rate_percentage / 100);
-      const salaryCap = baseSalary * (policy.max_deduction_cap_percentage / 100);
-      
-      const deductionCapApplied = grossDeduction > salaryCap;
-      const finalDeduction = deductionCapApplied ? salaryCap : grossDeduction;
-      const netPayout = baseSalary - finalDeduction;
-
-      const recordIndex = updatedRecords.findIndex(r => r.period === targetMonth && r.employee_id === employee.id);
-      
-      const newRecord: PayrollRecord = {
-        id: recordIndex >= 0 ? updatedRecords[recordIndex].id : `pay-${targetMonth}-${employee.id}`,
-        period: targetMonth,
-        source_month: sourceMonth,
-        employee_id: employee.id,
-        base_salary: baseSalary,
-        hourly_rate: hourlyRate,
-        regular_hours_worked: regularHours || 160,
-        total_corrective_hours: totalCorrectiveHours,
-        attributable_corrective_hours: attributableHours,
-        exempt_corrective_hours: exemptHours,
-        billable_deduction_hours: billableDeductionHours,
-        gross_deduction_amount: grossDeduction,
-        deduction_amount: finalDeduction,
-        deduction_cap_applied: deductionCapApplied,
-        net_payout: netPayout,
-        status: recordIndex >= 0 && updatedRecords[recordIndex].status === 'finalized' ? 'finalized' : 'draft',
-        notes: `${attributableHours}h attributable corrective rework in ${sourceMonth}. Grace applied: ${policy.monthly_grace_hours}h. Billable: ${billableDeductionHours}h @ $${hourlyRate}/hr (${policy.deduction_rate_percentage}%).`,
-        created_at: new Date().toISOString(),
-      };
-
-      if (recordIndex >= 0) {
-        updatedRecords[recordIndex] = newRecord;
-      } else {
-        updatedRecords.push(newRecord);
-      }
+  // Authoritative Payroll Calculation Engine
+  const calculatePayrollForMonth = (targetMonth: string, sourceMonth: string): PayrollCalculationSummary => {
+    const summary = payrollApi.calculate(targetMonth, sourceMonth, policy, {
+      calculatedBy: currentUser.id,
+      calculatedByName: currentUser.full_name,
     });
 
-    setPayrollRecords(updatedRecords);
-    StorageService.setPayroll(updatedRecords);
-    addAuditLog('PAYROLL_CALCULATED', 'payroll', targetMonth, `Recalculated payroll deductions for ${targetMonth} from ${sourceMonth} rework logs`);
-    addNotification('all', `Payroll Updated for ${targetMonth}`, `Payroll recalculation complete with latest approved corrective rework hours.`, 'info', '/payroll');
+    setPayrollRecords(StorageService.getPayroll());
+    setDeductionItems(StorageService.getDeductionItems());
+    setNotifications(StorageService.getNotifications());
+    setAuditLogs(StorageService.getAuditLogs());
+    return summary;
   };
 
-  const finalizePayrollRecord = (recordId: string) => {
-    const updated = payrollRecords.map(r => {
-      if (r.id === recordId) {
-        return {
-          ...r,
-          status: 'finalized' as const,
-          finalized_at: new Date().toISOString(),
-          finalized_by: currentUser.id,
-        };
-      }
-      return r;
-    });
-    setPayrollRecords(updated);
-    StorageService.setPayroll(updated);
-    addAuditLog('PAYROLL_FINALIZED', 'payroll', recordId, `Finalized payroll record ${recordId} by Finance Admin ${currentUser.full_name}`);
-    addNotification('all', 'Payslip Finalized', `Payslip finalized for record #${recordId}.`, 'success', '/payroll');
+  // Transactional Finalization
+  const finalizePayrollRecord = async (recordId: string) => {
+    const res = await payrollApi.finalize(recordId, currentUser.id, currentUser.full_name);
+    if (res.success) {
+      setPayrollRecords(StorageService.getPayroll());
+      setTimeLogs(StorageService.getTimeLogs());
+      setNotifications(StorageService.getNotifications());
+      setAuditLogs(StorageService.getAuditLogs());
+    }
+    return res;
+  };
+
+  // Controlled Post-Finalization Adjustment / Reversal
+  const addPayrollAdjustment = async (
+    recordId: string, 
+    adjustmentType: AdjustmentType, 
+    amount: number, 
+    reason: string
+  ) => {
+    const res = await payrollApi.createAdjustment(
+      recordId, 
+      adjustmentType, 
+      amount, 
+      reason, 
+      currentUser.id, 
+      currentUser.full_name
+    );
+    if (res.success) {
+      setPayrollRecords(StorageService.getPayroll());
+      setPayrollAdjustments(StorageService.getPayrollAdjustments());
+      setAuditLogs(StorageService.getAuditLogs());
+    }
+    return res;
   };
 
   const markNotificationRead = (id: string) => {
@@ -576,8 +549,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setTimeLogs(StorageService.getTimeLogs());
     setTaskStateHistory(StorageService.getTaskStateHistory());
     setBugAttributions(StorageService.getBugAttributions());
-    setPolicyState(StorageService.getPolicy());
+    setPolicyState(StorageService.getPayrollPolicy());
     setPayrollRecords(StorageService.getPayroll());
+    setDeductionItems(StorageService.getDeductionItems());
+    setPayrollAdjustments(StorageService.getPayrollAdjustments());
+    setEmployeeRates(StorageService.getEmployeeRates());
     setAuditLogs(StorageService.getAuditLogs());
     setNotifications(StorageService.getNotifications());
   };
@@ -594,6 +570,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         bugAttributions,
         policy,
         payrollRecords,
+        deductionItems,
+        payrollAdjustments,
+        employeeRates,
         auditLogs,
         notifications,
         selectedMonth,
@@ -622,6 +601,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatePolicy,
         calculatePayrollForMonth,
         finalizePayrollRecord,
+        addPayrollAdjustment,
         markNotificationRead,
         markAllNotificationsRead,
         resetAllData,

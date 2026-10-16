@@ -1,0 +1,653 @@
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { 
+  Bug, 
+  Plus, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Clock, 
+  ShieldAlert, 
+  FileText, 
+  Info, 
+  HelpCircle,
+  ExternalLink,
+  ChevronRight
+} from 'lucide-react';
+import { Button } from '../components/common/Button';
+import { Badge } from '../components/common/Badge';
+import { Modal } from '../components/common/Modal';
+import { formatDateTime, formatDate, cn } from '../lib/utils';
+import { BugReport, BugSeverity, BugStatus, DefectClassification } from '../types';
+
+export const Bugs: React.FC = () => {
+  const { bugs, modules, projects, tasks, addBugReport, classifyDefect, searchQuery } = useApp();
+  const { currentUser, users, canClassifyDefect } = useAuth();
+
+  const [classificationFilter, setClassificationFilter] = useState<string>('all');
+  const [severityFilter, setSeverityFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  // Modals
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [classifyTarget, setClassifyTarget] = useState<BugReport | null>(null);
+  const [selectedClassification, setSelectedClassification] = useState<DefectClassification>('caused_by_original_delivery');
+  const [classificationNotes, setClassificationNotes] = useState('');
+  const [detailBug, setDetailBug] = useState<BugReport | null>(null);
+
+  // Form State
+  const [newBug, setNewBug] = useState({
+    title: '',
+    description: '',
+    steps_to_reproduce: '',
+    severity: 'high' as BugSeverity,
+    status: 'open' as BugStatus,
+    project_id: projects[0]?.id || '',
+    module_id: modules[0]?.id || '',
+    task_id: tasks[0]?.id || '',
+    assigned_to: users.find(u => u.role === 'employee')?.id || users[0].id,
+    original_developer_id: users.find(u => u.role === 'employee')?.id || users[0].id,
+    reported_by: currentUser.id,
+    defect_classification: 'pending_investigation' as DefectClassification,
+  });
+
+  const handleReportBug = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBug.title || !newBug.module_id) return;
+    addBugReport(newBug);
+    setIsReportModalOpen(false);
+    setNewBug({
+      title: '',
+      description: '',
+      steps_to_reproduce: '',
+      severity: 'high',
+      status: 'open',
+      project_id: projects[0]?.id || '',
+      module_id: modules[0]?.id || '',
+      task_id: tasks[0]?.id || '',
+      assigned_to: users.find(u => u.role === 'employee')?.id || users[0].id,
+      original_developer_id: users.find(u => u.role === 'employee')?.id || users[0].id,
+      reported_by: currentUser.id,
+      defect_classification: 'pending_investigation',
+    });
+  };
+
+  const handleConfirmClassification = () => {
+    if (!classifyTarget) return;
+    classifyDefect(classifyTarget.id, selectedClassification, classificationNotes);
+    setClassifyTarget(null);
+    setClassificationNotes('');
+  };
+
+  // Metrics
+  const totalBugs = bugs.length;
+  const causedByDelivery = bugs.filter(b => b.defect_classification === 'caused_by_original_delivery').length;
+  const notCausedByDelivery = bugs.filter(b => b.defect_classification === 'not_caused_by_original_delivery').length;
+  const pendingInvestigation = bugs.filter(b => b.defect_classification === 'pending_investigation').length;
+
+  // Filter
+  const filteredBugs = bugs.filter((b) => {
+    const matchesSearch = 
+      b.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      b.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesClassification = classificationFilter === 'all' || b.defect_classification === classificationFilter;
+    const matchesSeverity = severityFilter === 'all' || b.severity === severityFilter;
+    const matchesStatus = statusFilter === 'all' || b.status === statusFilter;
+    return matchesSearch && matchesClassification && matchesSeverity && matchesStatus;
+  });
+
+  const getSeverityBadge = (severity: BugSeverity) => {
+    switch (severity) {
+      case 'critical':
+        return <Badge variant="danger" dot>Critical</Badge>;
+      case 'high':
+        return <Badge variant="warning" dot>High</Badge>;
+      case 'medium':
+        return <Badge variant="info">Medium</Badge>;
+      case 'low':
+        return <Badge variant="default">Low</Badge>;
+    }
+  };
+
+  const getClassificationBadge = (classification: DefectClassification) => {
+    switch (classification) {
+      case 'caused_by_original_delivery':
+        return (
+          <Badge variant="danger" dot title="Attributable rework hours will be subject to next-month payroll review">
+            Caused by Original Delivery
+          </Badge>
+        );
+      case 'not_caused_by_original_delivery':
+        return (
+          <Badge variant="success" dot title="Exempt from payroll deduction (external / client spec change)">
+            Not Caused by Delivery (Exempt)
+          </Badge>
+        );
+      case 'pending_investigation':
+        return (
+          <Badge variant="warning" dot title="Under managerial review">
+            Pending Investigation
+          </Badge>
+        );
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Metrics Banner */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Total Defect Reports</span>
+          <div className="text-2xl font-bold text-slate-900 mt-2">{totalBugs}</div>
+          <span className="text-[11px] text-slate-400 mt-1 block">Reported against delivered features</span>
+        </div>
+
+        <div className="bg-rose-50/60 p-4 rounded-xl border border-rose-200/80 shadow-2xs">
+          <span className="text-xs font-semibold text-rose-700 uppercase tracking-wider block">Attributable to Delivery</span>
+          <div className="text-2xl font-bold text-rose-700 mt-2">{causedByDelivery}</div>
+          <span className="text-[11px] text-rose-600/80 mt-1 block">Subject to payroll rework review</span>
+        </div>
+
+        <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200/80 shadow-2xs">
+          <span className="text-xs font-semibold text-emerald-700 uppercase tracking-wider block">Exempt (Spec / Client)</span>
+          <div className="text-2xl font-bold text-emerald-700 mt-2">{notCausedByDelivery}</div>
+          <span className="text-[11px] text-emerald-600/80 mt-1 block">Zero employee deduction applied</span>
+        </div>
+
+        <div className="bg-amber-50/60 p-4 rounded-xl border border-amber-200/80 shadow-2xs">
+          <span className="text-xs font-semibold text-amber-700 uppercase tracking-wider block">Pending Investigation</span>
+          <div className="text-2xl font-bold text-amber-700 mt-2">{pendingInvestigation}</div>
+          <span className="text-[11px] text-amber-600/80 mt-1 block">Awaiting managerial classification</span>
+        </div>
+      </div>
+
+      {/* Filter and Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Classification Filter */}
+          <select
+            value={classificationFilter}
+            onChange={(e) => setClassificationFilter(e.target.value)}
+            className="text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
+          >
+            <option value="all">All Classifications</option>
+            <option value="caused_by_original_delivery">Caused by Original Delivery</option>
+            <option value="not_caused_by_original_delivery">Not Caused by Delivery (Exempt)</option>
+            <option value="pending_investigation">Pending Investigation</option>
+          </select>
+
+          {/* Severity Filter */}
+          <select
+            value={severityFilter}
+            onChange={(e) => setSeverityFilter(e.target.value)}
+            className="text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
+          >
+            <option value="all">All Severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+
+          {/* Status Filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="text-xs font-medium px-3 py-2 bg-white border border-slate-200 rounded-lg shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
+          >
+            <option value="all">All Statuses</option>
+            <option value="open">Open</option>
+            <option value="investigating">Investigating</option>
+            <option value="in_fix">In Fix</option>
+            <option value="verified_resolved">Verified Resolved</option>
+          </select>
+        </div>
+
+        <Button
+          size="sm"
+          icon={<Plus className="w-3.5 h-3.5" />}
+          onClick={() => setIsReportModalOpen(true)}
+        >
+          Report Defect
+        </Button>
+      </div>
+
+      {/* Bugs Table */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold">
+              <tr>
+                <th className="px-5 py-3.5">Defect Summary & Module</th>
+                <th className="px-4 py-3.5">Severity</th>
+                <th className="px-4 py-3.5">Classification & Attribution</th>
+                <th className="px-4 py-3.5">Original Developer</th>
+                <th className="px-4 py-3.5">Status</th>
+                <th className="px-4 py-3.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredBugs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
+                    No defects found matching your criteria.
+                  </td>
+                </tr>
+              ) : (
+                filteredBugs.map((bug) => {
+                  const module = modules.find((m) => m.id === bug.module_id);
+                  const project = projects.find((p) => p.id === bug.project_id);
+                  const originalDev = users.find((u) => u.id === bug.original_developer_id);
+                  const isAttributable = bug.defect_classification === 'caused_by_original_delivery';
+
+                  return (
+                    <tr 
+                      key={bug.id}
+                      className={cn(
+                        'hover:bg-slate-50/70 transition-colors',
+                        isAttributable && 'bg-rose-50/15'
+                      )}
+                    >
+                      {/* Summary */}
+                      <td className="px-5 py-4 max-w-md">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded border">
+                            {bug.id}
+                          </span>
+                          <span className="font-semibold text-slate-900 text-xs">
+                            {bug.title}
+                          </span>
+                        </div>
+                        <p className="text-slate-500 text-[11px] mt-1 line-clamp-1">
+                          {bug.description}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-500">
+                          <span className="font-semibold text-slate-700">{project?.code}</span>
+                          <span>•</span>
+                          <span>{module?.name}</span>
+                        </div>
+                      </td>
+
+                      {/* Severity */}
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        {getSeverityBadge(bug.severity)}
+                      </td>
+
+                      {/* Classification */}
+                      <td className="px-4 py-4 max-w-xs">
+                        <div>
+                          {getClassificationBadge(bug.defect_classification)}
+                        </div>
+                        {bug.classification_notes ? (
+                          <p className="text-[11px] text-slate-500 mt-1 italic line-clamp-2">
+                            &quot;{bug.classification_notes}&quot;
+                          </p>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 block mt-1">
+                            Pending manager evaluation
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Original Developer */}
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={originalDev?.avatar_url}
+                            alt={originalDev?.full_name}
+                            className="w-6 h-6 rounded-full object-cover ring-1 ring-slate-200"
+                          />
+                          <div>
+                            <span className="font-medium text-slate-800 block">
+                              {originalDev?.full_name}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              ${originalDev?.hourly_rate}/hr rate
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <span className="capitalize text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                          {bug.status.replace('_', ' ')}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">
+                          {formatDate(bug.created_at)}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-4 py-4 whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setDetailBug(bug)}
+                            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors"
+                            title="View details & reproduction steps"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+
+                          {canClassifyDefect && (
+                            <button
+                              onClick={() => {
+                                setClassifyTarget(bug);
+                                setSelectedClassification(bug.defect_classification);
+                                setClassificationNotes(bug.classification_notes || '');
+                              }}
+                              className="px-2.5 py-1 text-xs font-medium rounded-md bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors flex items-center gap-1"
+                              title="Managerial defect classification"
+                            >
+                              <ShieldAlert className="w-3.5 h-3.5" />
+                              Classify
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modal: Report Defect */}
+      <Modal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        title="Report Post-Delivery Defect"
+        description="Log a defect discovered in production or client acceptance testing."
+      >
+        <form onSubmit={handleReportBug} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Defect Title *</label>
+            <input
+              type="text"
+              required
+              value={newBug.title}
+              onChange={(e) => setNewBug({ ...newBug, title: e.target.value })}
+              placeholder="e.g. Ledger discrepancy when batch exceeds 500 rows"
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Project *</label>
+              <select
+                value={newBug.project_id}
+                onChange={(e) => {
+                  const pId = e.target.value;
+                  const relevantModules = modules.filter(m => m.project_id === pId);
+                  setNewBug({
+                    ...newBug,
+                    project_id: pId,
+                    module_id: relevantModules[0]?.id || '',
+                  });
+                }}
+                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.code} - {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Delivered Module *</label>
+              <select
+                value={newBug.module_id}
+                onChange={(e) => setNewBug({ ...newBug, module_id: e.target.value })}
+                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {modules
+                  .filter(m => m.project_id === newBug.project_id)
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.code} - {m.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Severity *</label>
+              <select
+                value={newBug.severity}
+                onChange={(e) => setNewBug({ ...newBug, severity: e.target.value as BugSeverity })}
+                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="critical">Critical (Blocker)</option>
+                <option value="high">High (Major defect)</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low (Trivial)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Original Developer to Investigate</label>
+              <select
+                value={newBug.original_developer_id}
+                onChange={(e) => setNewBug({ ...newBug, original_developer_id: e.target.value, assigned_to: e.target.value })}
+                className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} ({u.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Defect Description *</label>
+            <textarea
+              rows={3}
+              required
+              value={newBug.description}
+              onChange={(e) => setNewBug({ ...newBug, description: e.target.value })}
+              placeholder="Describe the failure, error logs, and impact..."
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Steps to Reproduce</label>
+            <textarea
+              rows={3}
+              value={newBug.steps_to_reproduce}
+              onChange={(e) => setNewBug({ ...newBug, steps_to_reproduce: e.target.value })}
+              placeholder="1. Step one&#10;2. Step two&#10;3. Observed discrepancy"
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono text-[11px]"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setIsReportModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm">
+              Submit Bug Report
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Classify Defect (Manager Action) */}
+      <Modal
+        isOpen={Boolean(classifyTarget)}
+        onClose={() => setClassifyTarget(null)}
+        title="Managerial Defect Classification"
+        description="Determine delivery attribution for payroll rework deduction policy."
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+            <span className="font-mono text-slate-500 font-bold block">{classifyTarget?.id}</span>
+            <div className="font-semibold text-slate-900 mt-0.5">{classifyTarget?.title}</div>
+            <p className="text-slate-500 mt-1 line-clamp-2">{classifyTarget?.description}</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">Classification Decision *</label>
+            <div className="space-y-2">
+              <label 
+                className={cn(
+                  'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
+                  selectedClassification === 'caused_by_original_delivery'
+                    ? 'border-rose-300 bg-rose-50/50 ring-1 ring-rose-400'
+                    : 'border-slate-200 hover:bg-slate-50'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="classification"
+                  value="caused_by_original_delivery"
+                  checked={selectedClassification === 'caused_by_original_delivery'}
+                  onChange={() => setSelectedClassification('caused_by_original_delivery')}
+                  className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                />
+                <div>
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    Caused by Original Delivery
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 font-bold">
+                      Subject to Rework Deduction
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    Code defect, missing validation, or unhandled edge case within delivered requirements. Approved corrective hours will enter next-month deduction review.
+                  </p>
+                </div>
+              </label>
+
+              <label 
+                className={cn(
+                  'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
+                  selectedClassification === 'not_caused_by_original_delivery'
+                    ? 'border-emerald-300 bg-emerald-50/50 ring-1 ring-emerald-400'
+                    : 'border-slate-200 hover:bg-slate-50'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="classification"
+                  value="not_caused_by_original_delivery"
+                  checked={selectedClassification === 'not_caused_by_original_delivery'}
+                  onChange={() => setSelectedClassification('not_caused_by_original_delivery')}
+                  className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                />
+                <div>
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    Not Caused by Original Delivery
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold">
+                      Exempt from Deduction
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    Client specification shift, third-party API break, or environmental outage. Corrective hours remain visible for audit but zero deduction is applied.
+                  </p>
+                </div>
+              </label>
+
+              <label 
+                className={cn(
+                  'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
+                  selectedClassification === 'pending_investigation'
+                    ? 'border-amber-300 bg-amber-50/50 ring-1 ring-amber-400'
+                    : 'border-slate-200 hover:bg-slate-50'
+                )}
+              >
+                <input
+                  type="radio"
+                  name="classification"
+                  value="pending_investigation"
+                  checked={selectedClassification === 'pending_investigation'}
+                  onChange={() => setSelectedClassification('pending_investigation')}
+                  className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                />
+                <div>
+                  <div className="text-xs font-bold text-slate-900">Pending Investigation</div>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    Root cause investigation underway. No deduction applied until final classification.
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Manager Rationale & Classification Notes *
+            </label>
+            <textarea
+              rows={3}
+              required
+              value={classificationNotes}
+              onChange={(e) => setClassificationNotes(e.target.value)}
+              placeholder="Cite specific code audits, scope documents, or client communications..."
+              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setClassifyTarget(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleConfirmClassification}>
+              Save Classification
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Defect Details & Reproduction Steps */}
+      <Modal
+        isOpen={Boolean(detailBug)}
+        onClose={() => setDetailBug(null)}
+        title={detailBug?.title || 'Defect Details'}
+        description={`Bug ID: ${detailBug?.id}`}
+      >
+        <div className="space-y-4 text-xs">
+          <div className="flex items-center gap-2">
+            {detailBug && getSeverityBadge(detailBug.severity)}
+            {detailBug && getClassificationBadge(detailBug.defect_classification)}
+          </div>
+
+          <div>
+            <span className="font-semibold text-slate-700 block mb-1">Description:</span>
+            <p className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-slate-700 leading-relaxed">
+              {detailBug?.description}
+            </p>
+          </div>
+
+          <div>
+            <span className="font-semibold text-slate-700 block mb-1">Steps to Reproduce:</span>
+            <pre className="p-3 bg-slate-900 text-slate-100 rounded-lg font-mono text-[11px] whitespace-pre-wrap leading-relaxed overflow-x-auto">
+              {detailBug?.steps_to_reproduce || 'No reproduction steps provided.'}
+            </pre>
+          </div>
+
+          {detailBug?.classification_notes && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-900">
+              <span className="font-bold block">Manager Notes:</span>
+              <p className="mt-0.5">{detailBug.classification_notes}</p>
+            </div>
+          )}
+
+          <div className="pt-3 border-t border-slate-100 flex justify-end">
+            <Button variant="outline" size="sm" onClick={() => setDetailBug(null)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+};
